@@ -1,0 +1,4 @@
+ezdxf>=1.4,<2
+shapely>=2.0,<3
+PyQt5>=5.15.9,<5.16
+PyInstaller>=6.0,<7
