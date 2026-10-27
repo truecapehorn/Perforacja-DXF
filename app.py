@@ -238,7 +238,8 @@ class MainWindow(QMainWindow):
         self.diameter_input = _parameter_input(10.0, 0.1, 5000.0)
         form.addRow("Średnica otworu:", self.diameter_input)
         self.spacing_input = _parameter_input(10.0, 0.1, 10_000.0)
-        form.addRow("Odstęp / podziałka:", self.spacing_input)
+        self.spacing_label = QLabel("Odstęp / podziałka:")
+        form.addRow(self.spacing_label, self.spacing_input)
         self.spacing_mode = QComboBox()
         self.spacing_mode.addItem("Odstęp między krawędziami", "gap")
         self.spacing_mode.addItem("Podziałka osiowa", "pitch")
@@ -319,6 +320,12 @@ class MainWindow(QMainWindow):
     def _refresh(self, *_args) -> None:
         if self.drawing is None:
             return
+        self.spacing_label.setText(
+            "Podziałka po przekątnej:"
+            if self.pattern_input.currentData() == "staggered"
+            and self.spacing_mode.currentData() == "pitch"
+            else "Odstęp / podziałka:"
+        )
         try:
             material = resize_material(
                 self.drawing.material,

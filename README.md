@@ -35,7 +35,12 @@ budowaniu, aby pobrać biblioteki Pythona.
 - Margines jest zachowywany pomiędzy krawędzią detalu (także konturem
   wewnętrznym) a krawędzią otworu.
 - Odstęp oznacza szczelinę pomiędzy otworami; podziałka oznacza odległość
-  środek–środek. Otwory nie mogą nachodzić na siebie.
+  środek–środek. W układzie mijankowym podziałka jest odległością po przekątnej
+  między najbliższymi środkami: odległość pozioma w rzędzie pozostaje równa
+  podziałce, a odstęp rzędów wynosi `podziałka × √3 / 2`. Dla układu prostego
+  podziałka pozostaje jednakowa w poziomie i pionie. W trybie odstępu
+  szczelina jest zachowywana również dla najbliższych ukośnych otworów.
+  Otwory nie mogą nachodzić na siebie.
 - Eksport tworzy nowy, uproszczony DXF w milimetrach: obrysy zapisuje jako
   zamknięte polilinie, a otwory jako okręgi na warstwie `OTWORY`.
 

@@ -17,6 +17,50 @@ def test_spacing_gap_and_pitch_have_expected_center_distance():
     assert all(math.isclose(b - a, 20.0) for a, b in zip(x_values, x_values[1:]))
 
 
+@pytest.mark.parametrize("angle", [0.0, 37.0])
+def test_staggered_pitch_is_exact_between_diagonal_neighbors(angle):
+    square = Polygon([(0, 0), (60, 0), (60, 60), (0, 60)])
+
+    holes = generate_holes(square, 2, 10, 0, angle, "staggered", "pitch")
+
+    nearest_distance = min(
+        math.dist(first, second)
+        for index, first in enumerate(holes)
+        for second in holes[index + 1 :]
+    )
+    assert nearest_distance == pytest.approx(10.0)
+
+
+def test_staggered_gap_includes_diameter_in_diagonal_pitch():
+    square = Polygon([(0, 0), (60, 0), (60, 60), (0, 60)])
+
+    holes = generate_holes(square, 4, 6, 0, 0, "staggered", "gap")
+
+    nearest_distance = min(
+        math.dist(first, second)
+        for index, first in enumerate(holes)
+        for second in holes[index + 1 :]
+    )
+    assert nearest_distance == pytest.approx(10.0)
+
+
+def test_square_pitch_remains_equal_in_horizontal_and_vertical_directions():
+    square = Polygon([(0, 0), (60, 0), (60, 60), (0, 60)])
+
+    holes = generate_holes(square, 2, 10, 0, 0, "square", "pitch")
+
+    x_values = sorted({round(x, 6) for x, _ in holes})
+    y_values = sorted({round(y, 6) for _, y in holes})
+    assert all(
+        math.isclose(second - first, 10.0)
+        for first, second in zip(x_values, x_values[1:])
+    )
+    assert all(
+        math.isclose(second - first, 10.0)
+        for first, second in zip(y_values, y_values[1:])
+    )
+
+
 def test_margin_keeps_full_holes_clear_of_outer_and_inner_edges():
     shape = Polygon(
         [(0, 0), (100, 0), (100, 100), (0, 100)],

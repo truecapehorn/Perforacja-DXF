@@ -234,10 +234,13 @@ def generate_holes(
     local_max_x = max(point[0] for point in local_corners)
     local_min_y = min(point[1] for point in local_corners)
     local_max_y = max(point[1] for point in local_corners)
+    row_pitch = (
+        pitch * math.sqrt(3) / 2 if pattern == "staggered" else pitch
+    )
     first_column = math.floor(local_min_x / pitch) - 1
     last_column = math.ceil(local_max_x / pitch) + 1
-    first_row = math.floor(local_min_y / pitch) - 1
-    last_row = math.ceil(local_max_y / pitch) + 1
+    first_row = math.floor(local_min_y / row_pitch) - 1
+    last_row = math.ceil(local_max_y / row_pitch) + 1
     candidate_count = (last_column - first_column + 1) * (
         last_row - first_row + 1
     )
@@ -251,7 +254,7 @@ def generate_holes(
     holes: list[tuple[float, float]] = []
     for row in range(first_row, last_row + 1):
         row_offset = pitch / 2 if pattern == "staggered" and row % 2 else 0.0
-        local_y = row * pitch
+        local_y = row * row_pitch
         for column in range(first_column, last_column + 1):
             local_x = column * pitch + row_offset
             x = center_x + local_x * cosine - local_y * sine
