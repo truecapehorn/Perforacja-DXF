@@ -4,7 +4,13 @@ import ezdxf
 import pytest
 from shapely.geometry import Point, Polygon
 
-from geometry import export_dxf, generate_holes, load_dxf, resize_material
+from geometry import (
+    export_dxf,
+    generate_holes,
+    load_dxf,
+    open_area_percentage,
+    resize_material,
+)
 
 
 def test_spacing_gap_and_pitch_have_expected_center_distance():
@@ -81,6 +87,17 @@ def test_resizing_sets_exact_dimensions():
     resized = resize_material(source, 250.1, 125.5)
 
     assert resized.bounds == pytest.approx((0, 0, 250.1, 125.5))
+
+
+def test_open_area_percentage_uses_net_material_area_and_hole_count():
+    material = Polygon(
+        [(0, 0), (10, 0), (10, 10), (0, 10)],
+        holes=[[(3, 3), (7, 3), (7, 7), (3, 7)]],
+    )
+
+    percentage = open_area_percentage(material, 2, 2)
+
+    assert percentage == pytest.approx(2 * math.pi / 84 * 100)
 
 
 def test_load_dxf_joins_connected_lines(tmp_path):

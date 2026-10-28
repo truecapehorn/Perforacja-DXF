@@ -178,6 +178,13 @@ def resize_material(
     )
 
 
+def open_area_percentage(
+    material: BaseGeometry, hole_count: int, diameter_mm: float
+) -> float:
+    hole_area = math.pi * (diameter_mm / 2) ** 2
+    return hole_count * hole_area / material.area * 100
+
+
 def generate_holes(
     material: BaseGeometry,
     diameter_mm: float,

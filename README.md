@@ -43,6 +43,8 @@ budowaniu, aby pobrać biblioteki Pythona.
   Otwory nie mogą nachodzić na siebie.
 - Eksport tworzy nowy, uproszczony DXF w milimetrach: obrysy zapisuje jako
   zamknięte polilinie, a otwory jako okręgi na warstwie `OTWORY`.
+- Dolny pasek pokazuje liczbę otworów i stopień prześwitu, obliczany jako
+  łączna powierzchnia otworów podzielona przez powierzchnię materiału.
 
 To wersja startowa — warstwy opisowe i wymiary z oryginalnego rysunku nie są
 przenoszone do pliku wynikowego. Otwory mają okrągły kształt.

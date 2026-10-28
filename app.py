@@ -26,7 +26,14 @@ from PyQt5.QtWidgets import (
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 
-from geometry import Drawing, export_dxf, generate_holes, load_dxf, resize_material
+from geometry import (
+    Drawing,
+    export_dxf,
+    generate_holes,
+    load_dxf,
+    open_area_percentage,
+    resize_material,
+)
 
 
 class Preview(QWidget):
@@ -360,9 +367,13 @@ class MainWindow(QMainWindow):
         self.export_button.setEnabled(bool(holes))
         self.status.setStyleSheet("color: #9aa9bd;")
         min_x, min_y, max_x, max_y = material.bounds
+        open_area = open_area_percentage(
+            material, len(holes), self.diameter_input.value()
+        )
         messages = [
             f"Wymiary: {max_x - min_x:.1f} × {max_y - min_y:.1f} mm",
             f"Liczba otworów: {len(holes):,}",
+            f"Stopień prześwitu: {open_area:.1f}%",
         ]
         messages.extend(self.drawing.warnings)
         if not holes:
