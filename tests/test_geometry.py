@@ -2,12 +2,14 @@ import math
 
 import ezdxf
 import pytest
-from shapely.geometry import Point, Polygon
+from shapely.affinity import translate
+from shapely.geometry import Polygon
 
 from geometry import (
     export_dxf,
     generate_holes,
     load_dxf,
+    make_opening_shape,
     open_area_percentage,
     resize_material,
 )
@@ -15,8 +17,9 @@ from geometry import (
 
 def test_spacing_gap_and_pitch_have_expected_center_distance():
     square = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
-    gap_holes = generate_holes(square, 10, 10, 0, 0, "square", "gap")
-    pitch_holes = generate_holes(square, 10, 30, 0, 0, "square", "pitch")
+    opening = make_opening_shape("circle", 10)
+    gap_holes = generate_holes(square, opening, 10, 0, 0, "square", "gap")
+    pitch_holes = generate_holes(square, opening, 30, 0, 0, "square", "pitch")
 
     assert len(gap_holes) > len(pitch_holes)
     x_values = sorted({round(x, 6) for x, _ in gap_holes})
@@ -27,7 +30,9 @@ def test_spacing_gap_and_pitch_have_expected_center_distance():
 def test_staggered_pitch_is_exact_between_diagonal_neighbors(angle):
     square = Polygon([(0, 0), (60, 0), (60, 60), (0, 60)])
 
-    holes = generate_holes(square, 2, 10, 0, angle, "staggered", "pitch")
+    holes = generate_holes(
+        square, make_opening_shape("circle", 2), 10, 0, angle, "staggered", "pitch"
+    )
 
     nearest_distance = min(
         math.dist(first, second)
@@ -40,7 +45,9 @@ def test_staggered_pitch_is_exact_between_diagonal_neighbors(angle):
 def test_staggered_gap_includes_diameter_in_diagonal_pitch():
     square = Polygon([(0, 0), (60, 0), (60, 60), (0, 60)])
 
-    holes = generate_holes(square, 4, 6, 0, 0, "staggered", "gap")
+    holes = generate_holes(
+        square, make_opening_shape("circle", 4), 6, 0, 0, "staggered", "gap"
+    )
 
     nearest_distance = min(
         math.dist(first, second)
@@ -50,10 +57,22 @@ def test_staggered_gap_includes_diameter_in_diagonal_pitch():
     assert nearest_distance == pytest.approx(10.0)
 
 
+def test_pitch_allows_openings_that_touch_without_overlapping():
+    square = Polygon([(0, 0), (40, 0), (40, 40), (0, 40)])
+
+    holes = generate_holes(
+        square, make_opening_shape("circle", 10), 10, 0, 0, "square", "pitch"
+    )
+
+    assert holes
+
+
 def test_square_pitch_remains_equal_in_horizontal_and_vertical_directions():
     square = Polygon([(0, 0), (60, 0), (60, 60), (0, 60)])
 
-    holes = generate_holes(square, 2, 10, 0, 0, "square", "pitch")
+    holes = generate_holes(
+        square, make_opening_shape("circle", 2), 10, 0, 0, "square", "pitch"
+    )
 
     x_values = sorted({round(x, 6) for x, _ in holes})
     y_values = sorted({round(y, 6) for _, y in holes})
@@ -72,12 +91,15 @@ def test_margin_keeps_full_holes_clear_of_outer_and_inner_edges():
         [(0, 0), (100, 0), (100, 100), (0, 100)],
         holes=[[(40, 40), (60, 40), (60, 60), (40, 60)]],
     )
-    holes = generate_holes(shape, 4, 8, 3, 0, "square", "pitch")
+    opening = make_opening_shape("rectangle", 4, 2)
+    holes = generate_holes(shape, opening, 8, 3, 0, "square", "pitch")
 
     assert holes
     assert all(
-        shape.boundary.distance(Point(point)) >= 5.0 - 1e-7
-        for point in holes
+        shape.buffer(-3, join_style="mitre").covers(
+            translate(opening, xoff=x, yoff=y)
+        )
+        for x, y in holes
     )
 
 
@@ -95,9 +117,54 @@ def test_open_area_percentage_uses_net_material_area_and_hole_count():
         holes=[[(3, 3), (7, 3), (7, 7), (3, 7)]],
     )
 
-    percentage = open_area_percentage(material, 2, 2)
+    opening = make_opening_shape("circle", 2)
+    percentage = open_area_percentage(material, 2, opening)
 
-    assert percentage == pytest.approx(2 * math.pi / 84 * 100)
+    assert percentage == pytest.approx(2 * opening.area / 84 * 100)
+
+
+@pytest.mark.parametrize(
+    ("shape_type", "width", "height"),
+    [
+        ("circle", 12, 12),
+        ("square", 12, 12),
+        ("rectangle", 12, 8),
+        ("triangle", 12, 12 * math.sqrt(3) / 2),
+        ("ellipse", 12, 8),
+        ("regular_polygon", 12, 12 * math.sqrt(3) / 2),
+    ],
+)
+def test_builtin_opening_shapes_have_expected_bounds(shape_type, width, height):
+    opening = make_opening_shape(
+        shape_type, 12, 8 if shape_type in {"rectangle", "ellipse"} else None, 3
+    )
+
+    min_x, min_y, max_x, max_y = opening.bounds
+    assert max_x - min_x == pytest.approx(width)
+    assert max_y - min_y == pytest.approx(height)
+
+
+def test_custom_opening_keeps_aspect_ratio_and_is_centered():
+    source = Polygon([(10, 20), (30, 20), (30, 30), (10, 30)])
+
+    opening = make_opening_shape("custom", 40, custom_shape=source)
+
+    assert opening.bounds == pytest.approx((-20, -10, 20, 10))
+
+
+def test_too_small_pitch_rejects_overlapping_rectangular_openings():
+    plate = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+
+    with pytest.raises(ValueError, match="nachodzą na siebie"):
+        generate_holes(
+            plate,
+            make_opening_shape("rectangle", 10, 20),
+            10,
+            0,
+            0,
+            "square",
+            "pitch",
+        )
 
 
 def test_load_dxf_joins_connected_lines(tmp_path):
@@ -135,6 +202,11 @@ def test_load_dxf_preserves_nested_inner_contour_as_a_hole(tmp_path):
 
     assert drawing.material.area == pytest.approx(8_400)
     assert len(drawing.material.interiors) == 1
+    opening = make_opening_shape(
+        "custom", 200, custom_shape=drawing.material
+    )
+    assert opening.bounds == pytest.approx((-100, -100, 100, 100))
+    assert opening.area == pytest.approx(8_400 * 4)
 
 
 def test_load_dxf_flattens_circle_entity(tmp_path):
@@ -155,10 +227,42 @@ def test_export_writes_outline_and_circle_entities(tmp_path):
     destination = tmp_path / "output.dxf"
     shape = Polygon([(0, 0), (20, 0), (20, 20), (0, 20)])
 
-    export_dxf(destination, shape, [(10, 10)], 4)
+    export_dxf(
+        destination,
+        shape,
+        [(10, 10)],
+        make_opening_shape("circle", 4),
+        "circle",
+    )
 
     modelspace = ezdxf.readfile(destination).modelspace()
     assert [entity.dxftype() for entity in modelspace] == [
         "LWPOLYLINE",
         "CIRCLE",
     ]
+
+
+def test_export_writes_rotated_rectangular_opening_as_closed_polyline(tmp_path):
+    destination = tmp_path / "rectangle.dxf"
+    material = Polygon([(0, 0), (20, 0), (20, 20), (0, 20)])
+
+    export_dxf(
+        destination,
+        material,
+        [(10, 10)],
+        make_opening_shape("rectangle", 10, 4),
+        "rectangle",
+        90,
+    )
+
+    modelspace = ezdxf.readfile(destination).modelspace()
+    opening = list(modelspace)[1]
+    points = list(opening.get_points("xy"))
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    assert opening.dxftype() == "LWPOLYLINE"
+    assert opening.closed
+    assert min(xs) == pytest.approx(8)
+    assert max(xs) == pytest.approx(12)
+    assert min(ys) == pytest.approx(5)
+    assert max(ys) == pytest.approx(15)

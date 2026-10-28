@@ -20,6 +20,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSplitter,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -31,6 +32,7 @@ from geometry import (
     export_dxf,
     generate_holes,
     load_dxf,
+    make_opening_shape,
     open_area_percentage,
     resize_material,
 )
@@ -42,8 +44,10 @@ class Preview(QWidget):
         self.title = title
         self.material: BaseGeometry | None = None
         self.holes: list[tuple[float, float]] = []
-        self.diameter = 0.0
+        self.opening_shape: BaseGeometry | None = None
+        self.opening_type = "circle"
         self.margin = 0.0
+        self.angle = 0.0
         self.show_margin = True
         self.setMinimumSize(320, 300)
 
@@ -51,13 +55,17 @@ class Preview(QWidget):
         self,
         material: BaseGeometry | None,
         holes: list[tuple[float, float]] | None = None,
-        diameter: float = 0.0,
+        opening_shape: BaseGeometry | None = None,
         margin: float = 0.0,
+        angle: float = 0.0,
+        opening_type: str = "circle",
     ) -> None:
         self.material = material
         self.holes = holes or []
-        self.diameter = diameter
+        self.opening_shape = opening_shape
+        self.opening_type = opening_type
         self.margin = margin
+        self.angle = angle
         self.update()
 
     def paintEvent(self, _event) -> None:
@@ -95,12 +103,24 @@ class Preview(QWidget):
                 painter.setPen(pen)
                 painter.setBrush(Qt.NoBrush)
                 painter.drawPath(_geometry_path(clearance))
-        if self.holes:
+        if self.holes and self.opening_shape is not None:
             painter.setPen(Qt.NoPen)
             painter.setBrush(QColor("#16c9df"))
-            radius = self.diameter / 2
-            for x, y in self.holes:
-                painter.drawEllipse(QPointF(x, y), radius, radius)
+            if self.opening_type == "circle":
+                radius = (
+                    self.opening_shape.bounds[2]
+                    - self.opening_shape.bounds[0]
+                ) / 2
+                for x, y in self.holes:
+                    painter.drawEllipse(QPointF(x, y), radius, radius)
+            else:
+                opening_path = _geometry_path(self.opening_shape)
+                for x, y in self.holes:
+                    painter.save()
+                    painter.translate(x, y)
+                    painter.rotate(self.angle)
+                    painter.drawPath(opening_path)
+                    painter.restore()
 
 
 def _geometry_path(geometry: BaseGeometry) -> QPainterPath:
@@ -153,6 +173,9 @@ class MainWindow(QMainWindow):
         self.source_path: Path | None = None
         self.preview_material: BaseGeometry | None = None
         self.preview_holes: list[tuple[float, float]] = []
+        self.preview_opening: BaseGeometry | None = None
+        self.custom_opening: BaseGeometry | None = None
+        self.custom_opening_warnings: tuple[str, ...] = ()
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -242,8 +265,38 @@ class MainWindow(QMainWindow):
         self.pattern_input.addItem("Prosty (kwadratowy)", "square")
         self.pattern_input.addItem("Mijankowy", "staggered")
         form.addRow("Układ:", self.pattern_input)
-        self.diameter_input = _parameter_input(10.0, 0.1, 5000.0)
-        form.addRow("Średnica otworu:", self.diameter_input)
+        self.opening_type_input = QComboBox()
+        self.opening_type_input.addItem("Koło", "circle")
+        self.opening_type_input.addItem("Kwadrat", "square")
+        self.opening_type_input.addItem("Prostokąt", "rectangle")
+        self.opening_type_input.addItem("Trójkąt równoboczny", "triangle")
+        self.opening_type_input.addItem("Owal / elipsa", "ellipse")
+        self.opening_type_input.addItem("Wielokąt foremny", "regular_polygon")
+        self.opening_type_input.addItem("Własny kształt z DXF", "custom")
+        form.addRow("Kształt otworu:", self.opening_type_input)
+        self.opening_width_input = _parameter_input(10.0, 0.1, 5000.0)
+        self.opening_width_label = QLabel("Średnica otworu:")
+        form.addRow(self.opening_width_label, self.opening_width_input)
+        self.opening_height_input = _parameter_input(10.0, 0.1, 5000.0)
+        self.opening_height_label = QLabel("Wysokość otworu:")
+        form.addRow(self.opening_height_label, self.opening_height_input)
+        self.polygon_sides_input = QSpinBox()
+        self.polygon_sides_input.setRange(3, 20)
+        self.polygon_sides_input.setValue(6)
+        self.polygon_sides_label = QLabel("Liczba boków:")
+        form.addRow(self.polygon_sides_label, self.polygon_sides_input)
+        self.custom_opening_row = QWidget()
+        custom_shape_layout = QVBoxLayout(self.custom_opening_row)
+        custom_shape_layout.setContentsMargins(0, 0, 0, 0)
+        self.custom_opening_button = QPushButton("Wczytaj kształt DXF…")
+        self.custom_opening_button.clicked.connect(self._choose_opening_shape)
+        custom_shape_layout.addWidget(self.custom_opening_button)
+        self.custom_opening_name = QLabel("Nie wczytano pliku.")
+        self.custom_opening_name.setObjectName("muted")
+        self.custom_opening_name.setWordWrap(True)
+        custom_shape_layout.addWidget(self.custom_opening_name)
+        self.custom_opening_row_label = QLabel("Własny kształt:")
+        form.addRow(self.custom_opening_row_label, self.custom_opening_row)
         self.spacing_input = _parameter_input(10.0, 0.1, 10_000.0)
         self.spacing_label = QLabel("Odstęp / podziałka:")
         form.addRow(self.spacing_label, self.spacing_input)
@@ -277,7 +330,8 @@ class MainWindow(QMainWindow):
             self.width_input,
             self.height_input,
             self.pattern_input,
-            self.diameter_input,
+            self.opening_width_input,
+            self.opening_height_input,
             self.spacing_input,
             self.spacing_mode,
             self.angle_input,
@@ -286,6 +340,11 @@ class MainWindow(QMainWindow):
             field.valueChanged.connect(self._refresh) if isinstance(
                 field, QDoubleSpinBox
             ) else field.currentIndexChanged.connect(self._refresh)
+        self.opening_type_input.currentIndexChanged.connect(
+            self._opening_type_changed
+        )
+        self.polygon_sides_input.valueChanged.connect(self._refresh)
+        self._update_opening_controls()
         return panel
 
     def _choose_input(self) -> None:
@@ -307,6 +366,54 @@ class MainWindow(QMainWindow):
             if destination.suffix.lower() != ".dxf":
                 destination = destination.with_suffix(".dxf")
             self.output_path.setText(str(destination))
+
+    def _opening_type_changed(self, *_args) -> None:
+        self._update_opening_controls()
+        self._refresh()
+
+    def _update_opening_controls(self) -> None:
+        opening_type = self.opening_type_input.currentData()
+        self.opening_width_label.setText(
+            {
+                "circle": "Średnica otworu:",
+                "square": "Bok kwadratu:",
+                "triangle": "Szerokość trójkąta:",
+            }.get(opening_type, "Szerokość otworu:")
+        )
+        show_height = opening_type in {"rectangle", "ellipse"}
+        self.opening_height_label.setVisible(show_height)
+        self.opening_height_input.setVisible(show_height)
+        show_sides = opening_type == "regular_polygon"
+        self.polygon_sides_input.setVisible(show_sides)
+        self.polygon_sides_label.setVisible(show_sides)
+        show_custom = opening_type == "custom"
+        self.custom_opening_button.setVisible(show_custom)
+        self.custom_opening_name.setVisible(show_custom)
+        self.custom_opening_row.setVisible(show_custom)
+        self.custom_opening_row_label.setVisible(show_custom)
+
+    def _choose_opening_shape(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Wczytaj kształt otworu", "", "Pliki DXF (*.dxf)"
+        )
+        if not filename:
+            return
+        path = Path(filename)
+        try:
+            drawing = load_dxf(path)
+        except (OSError, ezdxf.DXFError, ValueError) as error:
+            QMessageBox.critical(
+                self, "Nie można wczytać kształtu DXF", str(error)
+            )
+            return
+        self.custom_opening = drawing.material
+        self.custom_opening_warnings = drawing.warnings
+        self.custom_opening_name.setText(path.name)
+        self.opening_width_input.setValue(drawing.width_mm)
+        self.opening_type_input.setCurrentIndex(
+            self.opening_type_input.findData("custom")
+        )
+        self._refresh()
 
     def _load_file(self, path: Path) -> None:
         try:
@@ -339,9 +446,16 @@ class MainWindow(QMainWindow):
                 self.width_input.value(),
                 self.height_input.value(),
             )
+            opening_shape = make_opening_shape(
+                self.opening_type_input.currentData(),
+                self.opening_width_input.value(),
+                self.opening_height_input.value(),
+                self.polygon_sides_input.value(),
+                self.custom_opening,
+            )
             holes = generate_holes(
                 material,
-                self.diameter_input.value(),
+                opening_shape,
                 self.spacing_input.value(),
                 self.margin_input.value(),
                 self.angle_input.value(),
@@ -351,6 +465,7 @@ class MainWindow(QMainWindow):
         except ValueError as error:
             self.preview_material = None
             self.preview_holes = []
+            self.preview_opening = None
             self.output_preview.set_data(None)
             self.export_button.setEnabled(False)
             self.status.setText(str(error))
@@ -358,17 +473,20 @@ class MainWindow(QMainWindow):
             return
         self.preview_material = material
         self.preview_holes = holes
+        self.preview_opening = opening_shape
         self.output_preview.set_data(
             material,
             holes,
-            self.diameter_input.value(),
+            opening_shape,
             self.margin_input.value(),
+            self.angle_input.value(),
+            self.opening_type_input.currentData(),
         )
         self.export_button.setEnabled(bool(holes))
         self.status.setStyleSheet("color: #9aa9bd;")
         min_x, min_y, max_x, max_y = material.bounds
         open_area = open_area_percentage(
-            material, len(holes), self.diameter_input.value()
+            material, len(holes), opening_shape
         )
         messages = [
             f"Wymiary: {max_x - min_x:.1f} × {max_y - min_y:.1f} mm",
@@ -376,14 +494,20 @@ class MainWindow(QMainWindow):
             f"Stopień prześwitu: {open_area:.1f}%",
         ]
         messages.extend(self.drawing.warnings)
+        if self.opening_type_input.currentData() == "custom":
+            messages.extend(self.custom_opening_warnings)
         if not holes:
             messages.append(
-                "Brak otworów: zmniejsz margines lub średnicę."
+                "Brak otworów: zmniejsz margines lub wymiary otworu."
             )
         self.status.setText("  |  ".join(messages))
 
     def _export(self) -> None:
-        if self.preview_material is None or not self.preview_holes:
+        if (
+            self.preview_material is None
+            or self.preview_opening is None
+            or not self.preview_holes
+        ):
             return
         filename = self.output_path.text().strip()
         if not filename:
@@ -415,7 +539,9 @@ class MainWindow(QMainWindow):
                 destination,
                 self.preview_material,
                 self.preview_holes,
-                self.diameter_input.value(),
+                self.preview_opening,
+                self.opening_type_input.currentData(),
+                self.angle_input.value(),
             )
         except (OSError, ezdxf.DXFError, ValueError) as error:
             QMessageBox.critical(self, "Nie można zapisać DXF", str(error))

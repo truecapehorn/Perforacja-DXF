@@ -9,7 +9,7 @@ import ezdxf
 from ezdxf.path import make_path
 from shapely import set_precision
 from shapely import unary_union
-from shapely.affinity import scale, translate
+from shapely.affinity import rotate, scale, translate
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import polygonize
@@ -178,47 +178,186 @@ def resize_material(
     )
 
 
+def make_opening_shape(
+    shape: str,
+    width_mm: float,
+    height_mm: float | None = None,
+    sides: int = 6,
+    custom_shape: BaseGeometry | None = None,
+) -> BaseGeometry:
+    if width_mm <= 0:
+        raise ValueError("Szerokość otworu musi być większa od zera.")
+    if shape in {"rectangle", "ellipse"} and (
+        height_mm is None or height_mm <= 0
+    ):
+        raise ValueError("Wysokość otworu musi być większa od zera.")
+
+    if shape == "circle":
+        opening = Point(0, 0).buffer(width_mm / 2, quad_segs=32)
+    elif shape == "square":
+        opening = Polygon(
+            [
+                (-width_mm / 2, -width_mm / 2),
+                (width_mm / 2, -width_mm / 2),
+                (width_mm / 2, width_mm / 2),
+                (-width_mm / 2, width_mm / 2),
+            ]
+        )
+    elif shape == "rectangle":
+        assert height_mm is not None
+        opening = Polygon(
+            [
+                (-width_mm / 2, -height_mm / 2),
+                (width_mm / 2, -height_mm / 2),
+                (width_mm / 2, height_mm / 2),
+                (-width_mm / 2, height_mm / 2),
+            ]
+        )
+    elif shape == "triangle":
+        height = width_mm * math.sqrt(3) / 2
+        opening = Polygon(
+            [
+                (-width_mm / 2, -height / 3),
+                (width_mm / 2, -height / 3),
+                (0, 2 * height / 3),
+            ]
+        )
+    elif shape == "ellipse":
+        assert height_mm is not None
+        opening = scale(
+            Point(0, 0).buffer(1, quad_segs=32),
+            xfact=width_mm / 2,
+            yfact=height_mm / 2,
+            origin=(0, 0),
+        )
+    elif shape == "regular_polygon":
+        if not 3 <= sides <= 20:
+            raise ValueError("Wielokąt musi mieć od 3 do 20 boków.")
+        unit_polygon = Polygon(
+            [
+                (
+                    math.cos(math.pi / 2 + 2 * math.pi * index / sides),
+                    math.sin(math.pi / 2 + 2 * math.pi * index / sides),
+                )
+                for index in range(sides)
+            ]
+        )
+        min_x, min_y, max_x, max_y = unit_polygon.bounds
+        opening = scale(
+            unit_polygon,
+            xfact=width_mm / (max_x - min_x),
+            yfact=width_mm / (max_x - min_x),
+            origin=(0, 0),
+        )
+    elif shape == "custom":
+        if custom_shape is None or custom_shape.is_empty:
+            raise ValueError("Wczytaj zamknięty kształt otworu z pliku DXF.")
+        min_x, min_y, max_x, max_y = custom_shape.bounds
+        source_width = max_x - min_x
+        source_height = max_y - min_y
+        if source_width <= 0 or source_height <= 0:
+            raise ValueError("Kształt z DXF nie ma prawidłowych wymiarów.")
+        factor = width_mm / source_width
+        opening = scale(
+            custom_shape,
+            xfact=factor,
+            yfact=factor,
+            origin=((min_x + max_x) / 2, (min_y + max_y) / 2),
+        )
+        opening = translate(
+            opening,
+            xoff=-(min_x + max_x) / 2,
+            yoff=-(min_y + max_y) / 2,
+        )
+    else:
+        raise ValueError("Nieznany kształt otworu.")
+
+    if not opening.is_valid or opening.area <= 0:
+        raise ValueError("Kształt otworu tworzy nieprawidłową geometrię.")
+    return opening
+
+
 def open_area_percentage(
-    material: BaseGeometry, hole_count: int, diameter_mm: float
+    material: BaseGeometry, hole_count: int, opening_shape: BaseGeometry
 ) -> float:
-    hole_area = math.pi * (diameter_mm / 2) ** 2
-    return hole_count * hole_area / material.area * 100
+    return hole_count * opening_shape.area / material.area * 100
 
 
 def generate_holes(
     material: BaseGeometry,
-    diameter_mm: float,
+    opening_shape: BaseGeometry,
     spacing_mm: float,
     margin_mm: float,
     angle_degrees: float,
     pattern: str,
     spacing_mode: str,
 ) -> list[tuple[float, float]]:
-    if diameter_mm <= 0:
-        raise ValueError("Średnica otworu musi być większa od zera.")
+    if opening_shape.is_empty or opening_shape.area <= 0:
+        raise ValueError("Kształt otworu musi mieć dodatnie pole.")
     if spacing_mm <= 0:
         raise ValueError("Odstęp lub podziałka musi być większa od zera.")
     if margin_mm < 0:
         raise ValueError("Margines nie może być ujemny.")
+    if not opening_shape.is_valid:
+        raise ValueError("Kształt otworu tworzy nieprawidłową geometrię.")
     if pattern not in {"square", "staggered"}:
         raise ValueError("Nieznany typ układu otworów.")
     if spacing_mode not in {"gap", "pitch"}:
         raise ValueError("Nieznany tryb określania odległości.")
 
-    pitch = spacing_mm + diameter_mm if spacing_mode == "gap" else spacing_mm
-    if pitch + 1e-9 < diameter_mm:
-        raise ValueError(
-            "Podziałka nie może być mniejsza od średnicy otworu."
-        )
-    allowed = material.buffer(
-        -(margin_mm + diameter_mm / 2),
-        quad_segs=8,
-        join_style="mitre",
+    min_x, shape_min_y, max_x, shape_max_y = opening_shape.bounds
+    radius = max(
+        math.hypot(x, y)
+        for x in (min_x, max_x)
+        for y in (shape_min_y, shape_max_y)
     )
+    if spacing_mode == "gap":
+
+        def has_required_gap(pitch: float) -> bool:
+            row_pitch = (
+                pitch * math.sqrt(3) / 2
+                if pattern == "staggered"
+                else pitch
+            )
+            offsets = (
+                [(pitch, 0), (0, pitch)]
+                if pattern == "square"
+                else [
+                    (pitch, 0),
+                    (pitch / 2, row_pitch),
+                    (-pitch / 2, row_pitch),
+                ]
+            )
+            return all(
+                opening_shape.distance(
+                    translate(opening_shape, xoff=offset_x, yoff=offset_y)
+                )
+                + 1e-7
+                >= spacing_mm
+                for offset_x, offset_y in offsets
+            )
+
+        low = 0.0
+        high = max(2 * radius + spacing_mm, spacing_mm)
+        for _ in range(40):
+            middle = (low + high) / 2
+            if has_required_gap(middle):
+                high = middle
+            else:
+                low = middle
+        pitch = high
+    else:
+        pitch = spacing_mm
+
+    allowed = material.buffer(-margin_mm, join_style="mitre")
     if allowed.is_empty:
         return []
 
     min_x, min_y, max_x, max_y = allowed.bounds
+    min_x -= radius
+    min_y -= radius
+    max_x += radius
+    max_y += radius
     center_x = (min_x + max_x) / 2
     center_y = (min_y + max_y) / 2
     radians = math.radians(angle_degrees)
@@ -259,6 +398,16 @@ def generate_holes(
 
     prepared = prep(allowed)
     holes: list[tuple[float, float]] = []
+    center_limit = max(
+        2 * radius + (spacing_mm if spacing_mode == "gap" else 0), 1e-9
+    )
+    cell_size = center_limit
+    neighboring_holes: dict[
+        tuple[int, int],
+        list[tuple[float, float, BaseGeometry]],
+    ] = {}
+    local_opening = opening_shape
+    rotated_opening = rotate(opening_shape, angle_degrees, origin=(0, 0))
     for row in range(first_row, last_row + 1):
         row_offset = pitch / 2 if pattern == "staggered" and row % 2 else 0.0
         local_y = row * row_pitch
@@ -266,13 +415,57 @@ def generate_holes(
             local_x = column * pitch + row_offset
             x = center_x + local_x * cosine - local_y * sine
             y = center_y + local_x * sine + local_y * cosine
-            if prepared.contains(Point(x, y)):
-                holes.append((x, y))
-                if len(holes) > MAX_HOLES:
-                    raise ValueError(
-                        f"Perforacja przekracza limit {MAX_HOLES:,} otworów. "
-                        "Zwiększ odstęp lub średnicę."
-                    )
+            placed_opening = translate(rotated_opening, xoff=x, yoff=y)
+            if not prepared.covers(placed_opening):
+                continue
+
+            bucket = (
+                math.floor(local_x / cell_size),
+                math.floor(local_y / cell_size),
+            )
+            for bucket_x in range(bucket[0] - 1, bucket[0] + 2):
+                for bucket_y in range(bucket[1] - 1, bucket[1] + 2):
+                    for other_x, other_y, other_opening in neighboring_holes.get(
+                        (bucket_x, bucket_y), []
+                    ):
+                        if (
+                            math.hypot(local_x - other_x, local_y - other_y)
+                            > center_limit
+                        ):
+                            continue
+                        local_placed_opening = translate(
+                            local_opening, xoff=local_x, yoff=local_y
+                        )
+                        distance = local_placed_opening.distance(other_opening)
+                        if spacing_mode == "pitch":
+                            collides = (
+                                local_placed_opening.intersection(
+                                    other_opening
+                                ).area
+                                > 1e-9
+                            )
+                        else:
+                            collides = distance + 1e-7 < spacing_mm
+                        if collides:
+                            raise ValueError(
+                                "Otwory nachodzą na siebie lub mają za mały "
+                                "odstęp. Zwiększ podziałkę albo zmniejsz "
+                                "wymiary kształtu."
+                            )
+
+            holes.append((x, y))
+            neighboring_holes.setdefault(bucket, []).append(
+                (
+                    local_x,
+                    local_y,
+                    translate(local_opening, xoff=local_x, yoff=local_y),
+                )
+            )
+            if len(holes) > MAX_HOLES:
+                raise ValueError(
+                    f"Perforacja przekracza limit {MAX_HOLES:,} otworów. "
+                    "Zwiększ odstęp lub zmniejsz wymiary detalu."
+                )
     return holes
 
 
@@ -280,7 +473,9 @@ def export_dxf(
     path: str | Path,
     material: BaseGeometry,
     holes: Iterable[tuple[float, float]],
-    diameter_mm: float,
+    opening_shape: BaseGeometry,
+    opening_type: str = "custom",
+    angle_degrees: float = 0.0,
 ) -> None:
     document = ezdxf.new("R2010")
     document.units = ezdxf.units.MM
@@ -301,9 +496,28 @@ def export_dxf(
                 close=True,
                 dxfattribs={"layer": "OBRYS"},
             )
-    radius = diameter_mm / 2
     for x, y in holes:
-        modelspace.add_circle(
-            (x, y), radius, dxfattribs={"layer": "OTWORY"}
+        if opening_type == "circle":
+            radius = (opening_shape.bounds[2] - opening_shape.bounds[0]) / 2
+            modelspace.add_circle((x, y), radius, dxfattribs={"layer": "OTWORY"})
+            continue
+        placed_opening = translate(
+            rotate(opening_shape, angle_degrees, origin=(0, 0)),
+            xoff=x,
+            yoff=y,
         )
+        for polygon in _polygon_parts(placed_opening):
+            modelspace.add_lwpolyline(
+                list(polygon.exterior.coords)[:-1],
+                format="xy",
+                close=True,
+                dxfattribs={"layer": "OTWORY"},
+            )
+            for interior in polygon.interiors:
+                modelspace.add_lwpolyline(
+                    list(interior.coords)[:-1],
+                    format="xy",
+                    close=True,
+                    dxfattribs={"layer": "OTWORY"},
+                )
     document.saveas(str(path))
