@@ -32,13 +32,17 @@ budowaniu, aby pobrać biblioteki Pythona.
   Przyciski zmiany wartości zwiększają ją domyślnie o 5 mm.
   Wymiary X i Y są ustawiane niezależnie, więc zmiana tylko jednego z nich
   może zmienić proporcje detalu.
-- Margines jest zachowywany pomiędzy krawędzią detalu (także konturem
-  wewnętrznym) a krawędzią otworu, niezależnie od kształtu otworu.
+- Osobno ustawia się margines od krawędzi zewnętrznej oraz od krawędzi
+  wewnętrznych i wysp materiału.
 - Otwory mogą mieć kształt koła, kwadratu, prostokąta, trójkąta
-  równobocznego, elipsy lub wielokąta foremnego (3–20 boków). Można też
-  wczytać własny kształt z osobnego pliku DXF. Zamknięte kontury są
-  interpretowane z uwzględnieniem zagnieżdżeń, a kształt jest skalowany do
-  podanej szerokości z zachowaniem proporcji.
+  równobocznego, elipsy, fasolki (długość, szerokość i promień zaokrąglenia)
+  lub wielokąta foremnego (3–20 boków). Promień fasolki nie może przekraczać
+  połowy jej krótszego wymiaru. Można też wczytać własny kształt z
+  osobnego pliku DXF. Zamknięte kontury są interpretowane z uwzględnieniem
+  zagnieżdżeń, a kształt jest skalowany do podanej szerokości z zachowaniem
+  proporcji.
+- Kąt siatki i kąt kształtu względem siatki są niezależne. Domyślne 0° kąta
+  względnego zachowuje dotychczasowe obracanie otworów razem z siatką.
 - Odstęp oznacza szczelinę pomiędzy otworami; podziałka oznacza odległość
   środek–środek. W układzie mijankowym podziałka jest odległością po przekątnej
   między najbliższymi środkami: odległość pozioma w rzędzie pozostaje równa
@@ -46,8 +50,11 @@ budowaniu, aby pobrać biblioteki Pythona.
   podziałka pozostaje jednakowa w poziomie i pionie. Odstęp jest sprawdzany
   pomiędzy rzeczywistymi obrysami; program nie pozwala na nachodzenie otworów.
 - Eksport tworzy nowy, uproszczony DXF w milimetrach: obrysy zapisuje jako
-  zamknięte polilinie, a otwory jako okręgi lub zamknięte polilinie na warstwie
-  `OTWORY`.
+  zamknięte polilinie na warstwie `OBRYS`, a otwory jako okręgi lub zamknięte
+  polilinie na warstwie `OTWORY`. Otwory można zapisać osobno albo jako jeden
+  blok `PERFORACJA`. Ponowne otwarcie takiego pliku wczytuje kontur z warstwy
+  `OBRYS` i pomija wcześniejsze otwory, dzięki czemu można wygenerować
+  perforację z nowymi parametrami.
 - Dolny pasek pokazuje liczbę otworów i stopień prześwitu, obliczany jako
   łączna powierzchnia otworów podzielona przez powierzchnię materiału.
 

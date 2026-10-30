@@ -118,10 +118,17 @@ def load_dxf(path: str | Path, flattening_tolerance_mm: float = 0.05) -> Drawing
             f"Nieobsługiwana jednostka DXF ({unit_code}); przyjęto milimetry."
         )
 
+    modelspace = document.modelspace()
+    reimporting_perforation = (
+        document.layers.has_entry("OBRYS")
+        and document.layers.has_entry("OTWORY")
+    )
     lines: list[LineString] = []
     skipped: set[str] = set()
     flattening_distance = max(flattening_tolerance_mm / factor, 1e-7)
-    for entity in document.modelspace():
+    for entity in modelspace:
+        if reimporting_perforation and entity.dxf.layer.upper() != "OBRYS":
+            continue
         try:
             path_object = make_path(entity)
             points = [
@@ -184,10 +191,11 @@ def make_opening_shape(
     height_mm: float | None = None,
     sides: int = 6,
     custom_shape: BaseGeometry | None = None,
+    radius_mm: float | None = None,
 ) -> BaseGeometry:
     if width_mm <= 0:
         raise ValueError("Szerokość otworu musi być większa od zera.")
-    if shape in {"rectangle", "ellipse"} and (
+    if shape in {"rectangle", "ellipse", "slot"} and (
         height_mm is None or height_mm <= 0
     ):
         raise ValueError("Wysokość otworu musi być większa od zera.")
@@ -230,6 +238,50 @@ def make_opening_shape(
             yfact=height_mm / 2,
             origin=(0, 0),
         )
+    elif shape == "slot":
+        assert height_mm is not None
+        radius = (
+            min(width_mm, height_mm) / 2
+            if radius_mm is None
+            else radius_mm
+        )
+        if radius < 0 or radius > min(width_mm, height_mm) / 2:
+            raise ValueError(
+                "Promień fasolki musi mieścić się między 0 a połową "
+                "jej krótszego wymiaru."
+            )
+        half_length = width_mm / 2
+        half_width = height_mm / 2
+        inner_x = half_length - radius
+        inner_y = half_width - radius
+        if radius == 0:
+            opening = Polygon(
+                [
+                    (-half_length, -half_width),
+                    (half_length, -half_width),
+                    (half_length, half_width),
+                    (-half_length, half_width),
+                ]
+            )
+        elif inner_x > 0 and inner_y > 0:
+            opening = Polygon(
+                [
+                    (-inner_x, -inner_y),
+                    (inner_x, -inner_y),
+                    (inner_x, inner_y),
+                    (-inner_x, inner_y),
+                ]
+            ).buffer(radius, quad_segs=32)
+        elif inner_x > 0:
+            opening = LineString([(-inner_x, 0), (inner_x, 0)]).buffer(
+                radius, quad_segs=32
+            )
+        elif inner_y > 0:
+            opening = LineString([(0, -inner_y), (0, inner_y)]).buffer(
+                radius, quad_segs=32
+            )
+        else:
+            opening = Point(0, 0).buffer(radius, quad_segs=32)
     elif shape == "regular_polygon":
         if not 3 <= sides <= 20:
             raise ValueError("Wielokąt musi mieć od 3 do 20 boków.")
@@ -283,6 +335,42 @@ def open_area_percentage(
     return hole_count * opening_shape.area / material.area * 100
 
 
+def material_clearance(
+    material: BaseGeometry,
+    outer_margin_mm: float,
+    inner_margin_mm: float | None = None,
+) -> BaseGeometry:
+    if outer_margin_mm < 0 or (
+        inner_margin_mm is not None and inner_margin_mm < 0
+    ):
+        raise ValueError("Margines nie może być ujemny.")
+    if inner_margin_mm is None:
+        inner_margin_mm = outer_margin_mm
+
+    polygons = _polygon_parts(material)
+    clearances: list[BaseGeometry] = []
+    for index, polygon in enumerate(polygons):
+        is_island = any(
+            Polygon(interior.coords).contains(polygon)
+            for other_index, other in enumerate(polygons)
+            if other_index != index
+            for interior in other.interiors
+        )
+        shell_margin = inner_margin_mm if is_island else outer_margin_mm
+        clearance = Polygon(polygon.exterior).buffer(
+            -shell_margin, join_style="mitre"
+        )
+        for interior in polygon.interiors:
+            clearance = clearance.difference(
+                Polygon(interior.coords).buffer(
+                    inner_margin_mm, join_style="mitre"
+                )
+            )
+        if not clearance.is_empty:
+            clearances.append(clearance)
+    return unary_union(clearances) if clearances else Polygon()
+
+
 def generate_holes(
     material: BaseGeometry,
     opening_shape: BaseGeometry,
@@ -291,12 +379,16 @@ def generate_holes(
     angle_degrees: float,
     pattern: str,
     spacing_mode: str,
+    inner_margin_mm: float | None = None,
+    opening_angle_degrees: float = 0.0,
 ) -> list[tuple[float, float]]:
     if opening_shape.is_empty or opening_shape.area <= 0:
         raise ValueError("Kształt otworu musi mieć dodatnie pole.")
     if spacing_mm <= 0:
         raise ValueError("Odstęp lub podziałka musi być większa od zera.")
-    if margin_mm < 0:
+    if margin_mm < 0 or (
+        inner_margin_mm is not None and inner_margin_mm < 0
+    ):
         raise ValueError("Margines nie może być ujemny.")
     if not opening_shape.is_valid:
         raise ValueError("Kształt otworu tworzy nieprawidłową geometrię.")
@@ -349,7 +441,7 @@ def generate_holes(
     else:
         pitch = spacing_mm
 
-    allowed = material.buffer(-margin_mm, join_style="mitre")
+    allowed = material_clearance(material, margin_mm, inner_margin_mm)
     if allowed.is_empty:
         return []
 
@@ -406,8 +498,14 @@ def generate_holes(
         tuple[int, int],
         list[tuple[float, float, BaseGeometry]],
     ] = {}
-    local_opening = opening_shape
-    rotated_opening = rotate(opening_shape, angle_degrees, origin=(0, 0))
+    local_opening = rotate(
+        opening_shape, opening_angle_degrees, origin=(0, 0)
+    )
+    rotated_opening = rotate(
+        opening_shape,
+        angle_degrees + opening_angle_degrees,
+        origin=(0, 0),
+    )
     for row in range(first_row, last_row + 1):
         row_offset = pitch / 2 if pattern == "staggered" and row % 2 else 0.0
         local_y = row * row_pitch
@@ -476,6 +574,8 @@ def export_dxf(
     opening_shape: BaseGeometry,
     opening_type: str = "custom",
     angle_degrees: float = 0.0,
+    opening_angle_degrees: float = 0.0,
+    perforation_as_block: bool = False,
 ) -> None:
     document = ezdxf.new("R2010")
     document.units = ezdxf.units.MM
@@ -496,28 +596,44 @@ def export_dxf(
                 close=True,
                 dxfattribs={"layer": "OBRYS"},
             )
+    block = (
+        document.blocks.new(name="PERFORACJA")
+        if perforation_as_block
+        else None
+    )
+    target = block if block is not None else modelspace
     for x, y in holes:
         if opening_type == "circle":
             radius = (opening_shape.bounds[2] - opening_shape.bounds[0]) / 2
-            modelspace.add_circle((x, y), radius, dxfattribs={"layer": "OTWORY"})
+            target.add_circle(
+                (x, y), radius, dxfattribs={"layer": "OTWORY"}
+            )
             continue
         placed_opening = translate(
-            rotate(opening_shape, angle_degrees, origin=(0, 0)),
+            rotate(
+                opening_shape,
+                angle_degrees + opening_angle_degrees,
+                origin=(0, 0),
+            ),
             xoff=x,
             yoff=y,
         )
         for polygon in _polygon_parts(placed_opening):
-            modelspace.add_lwpolyline(
+            target.add_lwpolyline(
                 list(polygon.exterior.coords)[:-1],
                 format="xy",
                 close=True,
                 dxfattribs={"layer": "OTWORY"},
             )
             for interior in polygon.interiors:
-                modelspace.add_lwpolyline(
+                target.add_lwpolyline(
                     list(interior.coords)[:-1],
                     format="xy",
                     close=True,
                     dxfattribs={"layer": "OTWORY"},
                 )
+    if block is not None:
+        modelspace.add_blockref(
+            block.name, (0, 0), dxfattribs={"layer": "OTWORY"}
+        )
     document.saveas(str(path))

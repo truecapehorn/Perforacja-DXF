@@ -3,12 +3,13 @@ import math
 import ezdxf
 import pytest
 from shapely.affinity import translate
-from shapely.geometry import Polygon
+from shapely.geometry import MultiPolygon, Polygon
 
 from geometry import (
     export_dxf,
     generate_holes,
     load_dxf,
+    material_clearance,
     make_opening_shape,
     open_area_percentage,
     resize_material,
@@ -131,12 +132,16 @@ def test_open_area_percentage_uses_net_material_area_and_hole_count():
         ("rectangle", 12, 8),
         ("triangle", 12, 12 * math.sqrt(3) / 2),
         ("ellipse", 12, 8),
+        ("slot", 12, 8),
         ("regular_polygon", 12, 12 * math.sqrt(3) / 2),
     ],
 )
 def test_builtin_opening_shapes_have_expected_bounds(shape_type, width, height):
     opening = make_opening_shape(
-        shape_type, 12, 8 if shape_type in {"rectangle", "ellipse"} else None, 3
+        shape_type,
+        12,
+        8 if shape_type in {"rectangle", "ellipse", "slot"} else None,
+        3,
     )
 
     min_x, min_y, max_x, max_y = opening.bounds
@@ -150,6 +155,44 @@ def test_custom_opening_keeps_aspect_ratio_and_is_centered():
     opening = make_opening_shape("custom", 40, custom_shape=source)
 
     assert opening.bounds == pytest.approx((-20, -10, 20, 10))
+
+
+def test_slot_has_rounded_ends_and_requested_overall_dimensions():
+    opening = make_opening_shape("slot", 20, 9, radius_mm=4.5)
+
+    assert opening.bounds == pytest.approx((-10, -4.5, 10, 4.5))
+    assert opening.area == pytest.approx(11 * 9 + math.pi * 4.5**2, rel=0.002)
+
+
+def test_slot_uses_independent_radius_instead_of_fixed_semicircles():
+    opening = make_opening_shape("slot", 20, 9, radius_mm=2)
+
+    assert opening.bounds == pytest.approx((-10, -4.5, 10, 4.5))
+    assert opening.area == pytest.approx(
+        20 * 9 - (4 - math.pi) * 2**2, rel=0.0001
+    )
+
+
+@pytest.mark.parametrize("radius", [-0.1, 4.6])
+def test_slot_rejects_radius_outside_shorter_dimension(radius):
+    with pytest.raises(ValueError, match="Promień fasolki"):
+        make_opening_shape("slot", 20, 9, radius_mm=radius)
+
+
+def test_inner_and_outer_margins_are_applied_independently():
+    outer = Polygon(
+        [(0, 0), (100, 0), (100, 100), (0, 100)],
+        holes=[[(20, 20), (80, 20), (80, 80), (20, 80)]],
+    )
+    island = Polygon([(35, 35), (65, 35), (65, 65), (35, 65)])
+    material = MultiPolygon([outer, island])
+
+    allowed = material_clearance(material, 2, 5)
+
+    assert allowed.bounds == pytest.approx((2, 2, 98, 98))
+    assert allowed.covers(Polygon([(40, 45), (60, 45), (60, 55), (40, 55)]))
+    assert not allowed.covers(Polygon([(34, 45), (66, 45), (66, 55), (34, 55)]))
+    assert not allowed.covers(Polygon([(14, 45), (16, 45), (16, 55), (14, 55)]))
 
 
 def test_too_small_pitch_rejects_overlapping_rectangular_openings():
@@ -266,3 +309,59 @@ def test_export_writes_rotated_rectangular_opening_as_closed_polyline(tmp_path):
     assert max(xs) == pytest.approx(12)
     assert min(ys) == pytest.approx(5)
     assert max(ys) == pytest.approx(15)
+
+
+def test_export_rotates_opening_independently_of_grid(tmp_path):
+    destination = tmp_path / "rotated_slot.dxf"
+    material = Polygon([(0, 0), (30, 0), (30, 30), (0, 30)])
+
+    export_dxf(
+        destination,
+        material,
+        [(15, 15)],
+        make_opening_shape("slot", 20, 5),
+        "slot",
+        opening_angle_degrees=90,
+    )
+
+    opening = list(ezdxf.readfile(destination).modelspace())[1]
+    points = list(opening.get_points("xy"))
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    assert max(xs) - min(xs) == pytest.approx(5)
+    assert max(ys) - min(ys) == pytest.approx(20)
+
+
+@pytest.mark.parametrize("as_block", [False, True])
+def test_exported_perforation_can_be_reimported_without_old_holes(
+    tmp_path, as_block
+):
+    destination = tmp_path / "reimport.dxf"
+    material = Polygon([(0, 0), (20, 0), (20, 20), (0, 20)])
+
+    export_dxf(
+        destination,
+        material,
+        [(10, 10), (15, 15)],
+        make_opening_shape("slot", 8, 3),
+        "slot",
+        perforation_as_block=as_block,
+    )
+
+    drawing = load_dxf(destination)
+
+    assert drawing.width_mm == pytest.approx(20)
+    assert drawing.height_mm == pytest.approx(20)
+    assert drawing.material.area == pytest.approx(400)
+    document = ezdxf.readfile(destination)
+    assert document.layers.has_entry("OBRYS")
+    assert document.layers.has_entry("OTWORY")
+    if as_block:
+        inserts = [
+            entity
+            for entity in document.modelspace()
+            if entity.dxftype() == "INSERT"
+        ]
+        assert len(inserts) == 1
+        assert inserts[0].dxf.layer == "OTWORY"
+        assert len(document.blocks.get("PERFORACJA")) == 2

@@ -32,6 +32,7 @@ from geometry import (
     export_dxf,
     generate_holes,
     load_dxf,
+    material_clearance,
     make_opening_shape,
     open_area_percentage,
     resize_material,
@@ -47,6 +48,7 @@ class Preview(QWidget):
         self.opening_shape: BaseGeometry | None = None
         self.opening_type = "circle"
         self.margin = 0.0
+        self.inner_margin = 0.0
         self.angle = 0.0
         self.show_margin = True
         self.setMinimumSize(320, 300)
@@ -59,13 +61,16 @@ class Preview(QWidget):
         margin: float = 0.0,
         angle: float = 0.0,
         opening_type: str = "circle",
+        inner_margin: float | None = None,
+        opening_angle: float = 0.0,
     ) -> None:
         self.material = material
         self.holes = holes or []
         self.opening_shape = opening_shape
         self.opening_type = opening_type
         self.margin = margin
-        self.angle = angle
+        self.angle = angle + opening_angle
+        self.inner_margin = margin if inner_margin is None else inner_margin
         self.update()
 
     def paintEvent(self, _event) -> None:
@@ -95,8 +100,12 @@ class Preview(QWidget):
         painter.setPen(QPen(QColor("#f4d84b"), max(1.0 / factor, 0.25 / factor)))
         painter.setBrush(QColor(21, 179, 205, 48))
         painter.drawPath(outline)
-        if self.show_margin and self.margin > 0:
-            clearance = self.material.buffer(-self.margin, join_style="mitre")
+        if self.show_margin and (
+            self.margin > 0 or self.inner_margin > 0
+        ):
+            clearance = material_clearance(
+                self.material, self.margin, self.inner_margin
+            )
             if not clearance.is_empty:
                 pen = QPen(QColor("#d378ce"), max(0.8 / factor, 0.2 / factor))
                 pen.setStyle(Qt.DashLine)
@@ -271,6 +280,9 @@ class MainWindow(QMainWindow):
         self.opening_type_input.addItem("Prostokąt", "rectangle")
         self.opening_type_input.addItem("Trójkąt równoboczny", "triangle")
         self.opening_type_input.addItem("Owal / elipsa", "ellipse")
+        self.opening_type_input.addItem(
+            "Fasolka (prostokąt z zaokrąglonymi końcami)", "slot"
+        )
         self.opening_type_input.addItem("Wielokąt foremny", "regular_polygon")
         self.opening_type_input.addItem("Własny kształt z DXF", "custom")
         form.addRow("Kształt otworu:", self.opening_type_input)
@@ -280,6 +292,9 @@ class MainWindow(QMainWindow):
         self.opening_height_input = _parameter_input(10.0, 0.1, 5000.0)
         self.opening_height_label = QLabel("Wysokość otworu:")
         form.addRow(self.opening_height_label, self.opening_height_input)
+        self.opening_radius_input = _parameter_input(4.5, 0.0, 2500.0)
+        self.opening_radius_label = QLabel("Promień fasolki:")
+        form.addRow(self.opening_radius_label, self.opening_radius_input)
         self.polygon_sides_input = QSpinBox()
         self.polygon_sides_input.setRange(3, 20)
         self.polygon_sides_input.setValue(6)
@@ -310,11 +325,30 @@ class MainWindow(QMainWindow):
         self.angle_input.setSingleStep(5.0)
         self.angle_input.setSuffix("°")
         form.addRow("Kąt siatki:", self.angle_input)
+        self.opening_angle_input = QDoubleSpinBox()
+        self.opening_angle_input.setDecimals(1)
+        self.opening_angle_input.setRange(-180.0, 180.0)
+        self.opening_angle_input.setSingleStep(5.0)
+        self.opening_angle_input.setSuffix("°")
+        form.addRow("Kąt kształtu względem siatki:", self.opening_angle_input)
         self.margin_input = _parameter_input(10.0, 0.0, 5000.0)
-        form.addRow("Margines od krawędzi:", self.margin_input)
+        form.addRow("Margines od krawędzi zewnętrznej:", self.margin_input)
+        self.inner_margin_input = _parameter_input(10.0, 0.0, 5000.0)
+        form.addRow(
+            "Margines od krawędzi wewnętrznej / wyspy:",
+            self.inner_margin_input,
+        )
         layout.addLayout(form)
 
         section("PLIK WYJŚCIOWY")
+        self.perforation_export_input = QComboBox()
+        self.perforation_export_input.addItem(
+            "Otwory jako osobne obiekty", False
+        )
+        self.perforation_export_input.addItem(
+            "Perforacja jako jeden blok", True
+        )
+        layout.addWidget(self.perforation_export_input)
         output_row = QHBoxLayout()
         self.output_path = QLineEdit()
         self.output_path.setPlaceholderText("Wybierz nazwę pliku DXF…")
@@ -332,10 +366,13 @@ class MainWindow(QMainWindow):
             self.pattern_input,
             self.opening_width_input,
             self.opening_height_input,
+            self.opening_radius_input,
             self.spacing_input,
             self.spacing_mode,
             self.angle_input,
+            self.opening_angle_input,
             self.margin_input,
+            self.inner_margin_input,
         ):
             field.valueChanged.connect(self._refresh) if isinstance(
                 field, QDoubleSpinBox
@@ -378,11 +415,20 @@ class MainWindow(QMainWindow):
                 "circle": "Średnica otworu:",
                 "square": "Bok kwadratu:",
                 "triangle": "Szerokość trójkąta:",
+                "slot": "Długość fasolki:",
             }.get(opening_type, "Szerokość otworu:")
         )
-        show_height = opening_type in {"rectangle", "ellipse"}
+        show_height = opening_type in {"rectangle", "ellipse", "slot"}
         self.opening_height_label.setVisible(show_height)
         self.opening_height_input.setVisible(show_height)
+        self.opening_height_label.setText(
+            "Szerokość fasolki:"
+            if opening_type == "slot"
+            else "Wysokość otworu:"
+        )
+        show_radius = opening_type == "slot"
+        self.opening_radius_label.setVisible(show_radius)
+        self.opening_radius_input.setVisible(show_radius)
         show_sides = opening_type == "regular_polygon"
         self.polygon_sides_input.setVisible(show_sides)
         self.polygon_sides_label.setVisible(show_sides)
@@ -452,6 +498,7 @@ class MainWindow(QMainWindow):
                 self.opening_height_input.value(),
                 self.polygon_sides_input.value(),
                 self.custom_opening,
+                radius_mm=self.opening_radius_input.value(),
             )
             holes = generate_holes(
                 material,
@@ -461,6 +508,8 @@ class MainWindow(QMainWindow):
                 self.angle_input.value(),
                 self.pattern_input.currentData(),
                 self.spacing_mode.currentData(),
+                inner_margin_mm=self.inner_margin_input.value(),
+                opening_angle_degrees=self.opening_angle_input.value(),
             )
         except ValueError as error:
             self.preview_material = None
@@ -481,6 +530,8 @@ class MainWindow(QMainWindow):
             self.margin_input.value(),
             self.angle_input.value(),
             self.opening_type_input.currentData(),
+            self.inner_margin_input.value(),
+            self.opening_angle_input.value(),
         )
         self.export_button.setEnabled(bool(holes))
         self.status.setStyleSheet("color: #9aa9bd;")
@@ -542,6 +593,8 @@ class MainWindow(QMainWindow):
                 self.preview_opening,
                 self.opening_type_input.currentData(),
                 self.angle_input.value(),
+                self.opening_angle_input.value(),
+                self.perforation_export_input.currentData(),
             )
         except (OSError, ezdxf.DXFError, ValueError) as error:
             QMessageBox.critical(self, "Nie można zapisać DXF", str(error))
