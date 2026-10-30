@@ -4,10 +4,11 @@ import sys
 from pathlib import Path
 
 import ezdxf
-from PyQt5.QtCore import QPointF, Qt
+from PyQt5.QtCore import QPoint, QPointF, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt5.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -40,6 +41,8 @@ from geometry import (
 
 
 class Preview(QWidget):
+    zoomChanged = pyqtSignal(float)
+
     def __init__(self, title: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.title = title
@@ -51,7 +54,55 @@ class Preview(QWidget):
         self.inner_margin = 0.0
         self.angle = 0.0
         self.show_margin = True
+        self.zoom_factor = 1.0
+        self.pan_offset = QPointF()
+        self._drag_position: QPoint | None = None
+        self.setCursor(Qt.OpenHandCursor)
         self.setMinimumSize(320, 300)
+
+    def set_zoom(self, zoom_factor: float) -> None:
+        self.zoom_factor = min(max(zoom_factor, 0.1), 20.0)
+        self.zoomChanged.emit(self.zoom_factor)
+        self.update()
+
+    def reset_zoom(self) -> None:
+        self.set_zoom(1.0)
+        self.pan_offset = QPointF()
+        self.update()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._drag_position = event.pos()
+            self.setCursor(Qt.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_position is not None:
+            delta = event.pos() - self._drag_position
+            self.pan_offset += QPointF(delta.x(), delta.y())
+            self._drag_position = event.pos()
+            self.update()
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton and self._drag_position is not None:
+            self._drag_position = None
+            self.setCursor(Qt.OpenHandCursor)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def wheelEvent(self, event) -> None:
+        steps = event.angleDelta().y() / 120
+        if steps:
+            self.set_zoom(self.zoom_factor * 1.15**steps)
+            event.accept()
+            return
+        event.ignore()
 
     def set_data(
         self,
@@ -91,8 +142,11 @@ class Preview(QWidget):
         factor = min(
             max((self.width() - 2 * padding) / width, 1e-9),
             max((self.height() - 2 * padding) / height, 1e-9),
+        ) * self.zoom_factor
+        painter.translate(
+            self.width() / 2 + self.pan_offset.x(),
+            self.height() / 2 + 5 + self.pan_offset.y(),
         )
-        painter.translate(self.width() / 2, self.height() / 2 + 5)
         painter.scale(factor, -factor)
         painter.translate(-(min_x + max_x) / 2, -(min_y + max_y) / 2)
 
@@ -227,13 +281,55 @@ class MainWindow(QMainWindow):
         controls = self._build_controls()
         splitter.addWidget(controls)
         preview_area = QWidget()
-        previews = QHBoxLayout(preview_area)
-        previews.setContentsMargins(0, 0, 0, 0)
-        previews.setSpacing(8)
         self.source_preview = Preview("RYSUNEK ŹRÓDŁOWY")
         self.output_preview = Preview("PODGLĄD PERFORACJI")
+        preview_layout = QVBoxLayout(preview_area)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setSpacing(8)
+        preview_toolbar = QHBoxLayout()
+        self.source_preview_toggle = QCheckBox("Pokaż rysunek źródłowy")
+        self.source_preview_toggle.setChecked(True)
+        self.source_preview_toggle.toggled.connect(
+            lambda visible: self.source_preview.setVisible(visible)
+        )
+        preview_toolbar.addWidget(self.source_preview_toggle)
+        preview_toolbar.addStretch()
+        preview_toolbar.addWidget(QLabel("Zoom podglądu:"))
+        zoom_out_button = QPushButton("−")
+        zoom_out_button.setToolTip("Pomniejsz podgląd")
+        zoom_out_button.clicked.connect(
+            lambda: self.output_preview.set_zoom(
+                self.output_preview.zoom_factor / 1.25
+            )
+        )
+        preview_toolbar.addWidget(zoom_out_button)
+        self.zoom_label = QLabel("100%")
+        self.zoom_label.setMinimumWidth(48)
+        self.zoom_label.setAlignment(Qt.AlignCenter)
+        preview_toolbar.addWidget(self.zoom_label)
+        zoom_in_button = QPushButton("+")
+        zoom_in_button.setToolTip("Powiększ podgląd")
+        zoom_in_button.clicked.connect(
+            lambda: self.output_preview.set_zoom(
+                self.output_preview.zoom_factor * 1.25
+            )
+        )
+        preview_toolbar.addWidget(zoom_in_button)
+        fit_button = QPushButton("Dopasuj")
+        fit_button.setToolTip("Dopasuj rysunek do podglądu")
+        fit_button.clicked.connect(self.output_preview.reset_zoom)
+        preview_toolbar.addWidget(fit_button)
+        preview_layout.addLayout(preview_toolbar)
+
+        previews = QHBoxLayout()
+        previews.setContentsMargins(0, 0, 0, 0)
+        previews.setSpacing(8)
+        self.output_preview.zoomChanged.connect(
+            lambda zoom: self.zoom_label.setText(f"{zoom:.0%}")
+        )
         previews.addWidget(self.source_preview)
         previews.addWidget(self.output_preview)
+        preview_layout.addLayout(previews, 1)
         splitter.addWidget(preview_area)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -460,6 +556,7 @@ class MainWindow(QMainWindow):
             return
         self.drawing = drawing
         self.source_path = path
+        self.output_preview.reset_zoom()
         self.width_input.setValue(drawing.width_mm)
         self.height_input.setValue(drawing.height_mm)
         self.output_path.setText(

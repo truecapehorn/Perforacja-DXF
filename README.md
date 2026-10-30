@@ -82,13 +82,16 @@ Skrypt buduje wersję dla Windows; nie tworzy pliku wykonywalnego dla Linux.
 ## Szybki przebieg pracy
 
 1. Kliknij **Otwórz DXF** i wybierz rysunek detalu.
-2. Sprawdź podgląd źródłowy oraz komunikaty na dolnym pasku. Jeśli rozmiar
-   jest nieprawidłowy, upewnij się, że plik ma poprawnie ustawione jednostki.
+2. Sprawdź podgląd źródłowy oraz komunikaty na dolnym pasku. Rysunek źródłowy
+   możesz ukryć, odznaczając opcję nad podglądami. Jeśli rozmiar jest
+   nieprawidłowy, upewnij się, że plik ma poprawnie ustawione jednostki.
 3. Ustaw wymiary gotowego detalu, kształt i rozmiar otworu, układ,
    odległości, kąty oraz marginesy.
-4. Sprawdź podgląd perforacji. Zmiany parametrów są przeliczane automatycznie.
-   Jeśli konfiguracja jest nieprawidłowa, komunikat błędu pojawi się na dole,
-   a eksport zostanie wyłączony.
+4. Sprawdź podgląd perforacji. Przybliżaj i oddalaj go kółkiem myszy albo
+   przyciskami **+** i **−**; przycisk **Dopasuj** przywraca widok całego
+   detalu. Zmiany parametrów są przeliczane automatycznie. Jeśli konfiguracja
+   jest nieprawidłowa, komunikat błędu pojawi się na dole, a eksport zostanie
+   wyłączony.
 5. Wybierz sposób eksportu perforacji i nazwę pliku, a następnie kliknij
    **Eksportuj DXF**. Program nie pozwala nadpisać aktualnie otwartego pliku
    źródłowego; przed nadpisaniem innego istniejącego pliku prosi o
@@ -186,6 +189,11 @@ zmienia sposób organizacji otworów w DXF, nie ich geometrię.
 ## Podgląd i ograniczenia
 
 - Lewy panel pokazuje rysunek źródłowy, prawy — aktualny podgląd perforacji.
+  Rysunek źródłowy można ukryć opcją nad podglądami. Podgląd perforacji można
+  powiększać i pomniejszać kółkiem myszy lub przyciskami **+**/**−**, a
+  przesuwać, przeciągając go lewym przyciskiem myszy. **Dopasuj** przywraca
+  widok całego detalu. Zoom jest ograniczony do 10–2000% i wraca do dopasowania
+  po wczytaniu nowego rysunku.
 - Dolny pasek pokazuje wymiary, liczbę otworów i stopień prześwitu. Prześwit
   jest szacowany jako łączna powierzchnia otworów podzielona przez pole
   materiału.
