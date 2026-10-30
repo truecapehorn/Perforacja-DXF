@@ -157,26 +157,16 @@ def test_custom_opening_keeps_aspect_ratio_and_is_centered():
     assert opening.bounds == pytest.approx((-20, -10, 20, 10))
 
 
-def test_slot_has_rounded_ends_and_requested_overall_dimensions():
-    opening = make_opening_shape("slot", 20, 9, radius_mm=4.5)
+def test_slot_radius_is_half_its_width():
+    opening = make_opening_shape("slot", 20, 9)
 
     assert opening.bounds == pytest.approx((-10, -4.5, 10, 4.5))
     assert opening.area == pytest.approx(11 * 9 + math.pi * 4.5**2, rel=0.002)
 
 
-def test_slot_uses_independent_radius_instead_of_fixed_semicircles():
-    opening = make_opening_shape("slot", 20, 9, radius_mm=2)
-
-    assert opening.bounds == pytest.approx((-10, -4.5, 10, 4.5))
-    assert opening.area == pytest.approx(
-        20 * 9 - (4 - math.pi) * 2**2, rel=0.0001
-    )
-
-
-@pytest.mark.parametrize("radius", [-0.1, 4.6])
-def test_slot_rejects_radius_outside_shorter_dimension(radius):
-    with pytest.raises(ValueError, match="Promień fasolki"):
-        make_opening_shape("slot", 20, 9, radius_mm=radius)
+def test_slot_rejects_length_shorter_than_width():
+    with pytest.raises(ValueError, match="Długość fasolki"):
+        make_opening_shape("slot", 8, 12)
 
 
 def test_inner_and_outer_margins_are_applied_independently():

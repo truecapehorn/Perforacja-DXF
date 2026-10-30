@@ -2,6 +2,10 @@
 setlocal
 cd /d "%~dp0"
 
+set "APP_NAME="
+set /p "APP_NAME=Podaj nazwe pliku EXE bez rozszerzenia [PerforacjaDXF]: "
+if not defined APP_NAME set "APP_NAME=PerforacjaDXF"
+
 if not exist ".build-venv\Scripts\python.exe" (
   python -m venv .build-venv
   if errorlevel 1 exit /b 1
@@ -11,9 +15,9 @@ if not exist ".build-venv\Scripts\python.exe" (
 if errorlevel 1 exit /b 1
 
 ".build-venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --windowed --onefile ^
-  --name PerforacjaDXF ^
+  --name "%APP_NAME%" ^
   app.py
 if errorlevel 1 exit /b 1
 
 echo.
-echo Gotowy plik: dist\PerforacjaDXF.exe
+echo Gotowy plik: dist\%APP_NAME%.exe

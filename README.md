@@ -70,10 +70,12 @@ W innych dystrybucjach użyj ich menedżera pakietów do instalacji Pythona
 
 ## Budowanie aplikacji EXE w Windows
 
-Uruchom `build_exe.bat` w Windows. Skrypt tworzy środowisko `.build-venv`,
-instaluje zależności i buduje jednoplikową aplikację. Wynik znajduje się
-w `dist\PerforacjaDXF.exe`. Przy pierwszym budowaniu wymagane jest połączenie
-z internetem.
+Uruchom `build_exe.bat` w Windows. Skrypt zapyta o nazwę pliku EXE (podaj ją
+bez rozszerzenia `.exe`); pozostawienie pola pustego wybiera
+`PerforacjaDXF`. Następnie skrypt tworzy środowisko `.build-venv`, instaluje
+zależności i buduje jednoplikową aplikację. Wynik znajduje się w folderze
+`dist`, pod podaną nazwą, np. `dist\MojaPerforacja.exe`. Przy pierwszym
+budowaniu wymagane jest połączenie z internetem.
 
 Skrypt buduje wersję dla Windows; nie tworzy pliku wykonywalnego dla Linux.
 
@@ -111,9 +113,9 @@ Program udostępnia:
 - **Prostokąt** — parametry to szerokość i wysokość.
 - **Trójkąt równoboczny** — parametr to szerokość podstawy.
 - **Owal / elipsa** — parametry to szerokość i wysokość.
-- **Fasolka** — parametry to całkowita długość, szerokość i promień
-  zaokrąglenia narożników. Promień nie może przekraczać połowy krótszego
-  wymiaru. Promień równy połowie szerokości daje końce półokrągłe.
+- **Fasolka** — parametry to całkowita długość i szerokość. Promień
+  zaokrąglenia końców wynika z szerokości i jest równy jej połowie. Długość
+  musi być równa lub większa od szerokości.
 - **Wielokąt foremny** — szerokość oraz liczba boków od 3 do 20.
 - **Własny kształt z DXF** — wybierz osobny plik z zamkniętym konturem.
   Kształt jest skalowany do podanej szerokości z zachowaniem proporcji;

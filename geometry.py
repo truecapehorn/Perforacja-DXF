@@ -191,7 +191,6 @@ def make_opening_shape(
     height_mm: float | None = None,
     sides: int = 6,
     custom_shape: BaseGeometry | None = None,
-    radius_mm: float | None = None,
 ) -> BaseGeometry:
     if width_mm <= 0:
         raise ValueError("Szerokość otworu musi być większa od zera.")
@@ -240,48 +239,18 @@ def make_opening_shape(
         )
     elif shape == "slot":
         assert height_mm is not None
-        radius = (
-            min(width_mm, height_mm) / 2
-            if radius_mm is None
-            else radius_mm
-        )
-        if radius < 0 or radius > min(width_mm, height_mm) / 2:
+        if width_mm < height_mm:
             raise ValueError(
-                "Promień fasolki musi mieścić się między 0 a połową "
-                "jej krótszego wymiaru."
+                "Długość fasolki musi być równa lub większa od jej szerokości."
             )
-        half_length = width_mm / 2
-        half_width = height_mm / 2
-        inner_x = half_length - radius
-        inner_y = half_width - radius
-        if radius == 0:
-            opening = Polygon(
-                [
-                    (-half_length, -half_width),
-                    (half_length, -half_width),
-                    (half_length, half_width),
-                    (-half_length, half_width),
-                ]
-            )
-        elif inner_x > 0 and inner_y > 0:
-            opening = Polygon(
-                [
-                    (-inner_x, -inner_y),
-                    (inner_x, -inner_y),
-                    (inner_x, inner_y),
-                    (-inner_x, inner_y),
-                ]
-            ).buffer(radius, quad_segs=32)
-        elif inner_x > 0:
-            opening = LineString([(-inner_x, 0), (inner_x, 0)]).buffer(
-                radius, quad_segs=32
-            )
-        elif inner_y > 0:
-            opening = LineString([(0, -inner_y), (0, inner_y)]).buffer(
-                radius, quad_segs=32
-            )
-        else:
+        radius = height_mm / 2
+        half_centerline = (width_mm - height_mm) / 2
+        if half_centerline == 0:
             opening = Point(0, 0).buffer(radius, quad_segs=32)
+        else:
+            opening = LineString(
+                [(-half_centerline, 0), (half_centerline, 0)]
+            ).buffer(radius, quad_segs=32)
     elif shape == "regular_polygon":
         if not 3 <= sides <= 20:
             raise ValueError("Wielokąt musi mieć od 3 do 20 boków.")

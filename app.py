@@ -290,9 +290,6 @@ class MainWindow(QMainWindow):
         self.opening_height_input = _parameter_input(10.0, 0.1, 5000.0)
         self.opening_height_label = QLabel("Wysokość otworu:")
         form.addRow(self.opening_height_label, self.opening_height_input)
-        self.opening_radius_input = _parameter_input(4.5, 0.0, 2500.0)
-        self.opening_radius_label = QLabel("Promień fasolki:")
-        form.addRow(self.opening_radius_label, self.opening_radius_input)
         self.polygon_sides_input = QSpinBox()
         self.polygon_sides_input.setRange(3, 20)
         self.polygon_sides_input.setValue(6)
@@ -364,7 +361,6 @@ class MainWindow(QMainWindow):
             self.pattern_input,
             self.opening_width_input,
             self.opening_height_input,
-            self.opening_radius_input,
             self.spacing_input,
             self.spacing_mode,
             self.angle_input,
@@ -424,9 +420,6 @@ class MainWindow(QMainWindow):
             if opening_type == "slot"
             else "Wysokość otworu:"
         )
-        show_radius = opening_type == "slot"
-        self.opening_radius_label.setVisible(show_radius)
-        self.opening_radius_input.setVisible(show_radius)
         show_sides = opening_type == "regular_polygon"
         self.polygon_sides_input.setVisible(show_sides)
         self.polygon_sides_label.setVisible(show_sides)
@@ -496,7 +489,6 @@ class MainWindow(QMainWindow):
                 self.opening_height_input.value(),
                 self.polygon_sides_input.value(),
                 self.custom_opening,
-                radius_mm=self.opening_radius_input.value(),
             )
             holes = generate_holes(
                 material,
