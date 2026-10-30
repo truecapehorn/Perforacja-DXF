@@ -280,9 +280,7 @@ class MainWindow(QMainWindow):
         self.opening_type_input.addItem("Prostokąt", "rectangle")
         self.opening_type_input.addItem("Trójkąt równoboczny", "triangle")
         self.opening_type_input.addItem("Owal / elipsa", "ellipse")
-        self.opening_type_input.addItem(
-            "Fasolka (prostokąt z zaokrąglonymi końcami)", "slot"
-        )
+        self.opening_type_input.addItem("Fasolka", "slot")
         self.opening_type_input.addItem("Wielokąt foremny", "regular_polygon")
         self.opening_type_input.addItem("Własny kształt z DXF", "custom")
         form.addRow("Kształt otworu:", self.opening_type_input)
