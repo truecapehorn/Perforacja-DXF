@@ -574,11 +574,7 @@ def generate_random_holes(
                             + horizontal_gap
                         )
                     else:
-                        cursor_x += (
-                            minimum_shape_bounds[2]
-                            - minimum_shape_bounds[0]
-                            + min_horizontal_gap_mm
-                        )
+                        cursor_x += min(1.0, max(0.01, min_width_mm / 10))
 
         if row_height <= 0:
             row_height = nominal_row_height

@@ -528,6 +528,44 @@ def test_random_holes_cover_available_segments_without_target_control():
     )
 
 
+def test_random_holes_do_not_add_spacing_after_inner_clearance():
+    inner_opening = Point(150, 150).buffer(40, quad_segs=64)
+    material = Polygon(
+        [(0, 0), (300, 0), (300, 300), (0, 300)],
+        holes=[list(inner_opening.exterior.coords)],
+    )
+
+    holes = generate_random_holes(
+        material,
+        make_opening_shape("slot", 10, 10),
+        min_width_mm=10,
+        max_width_mm=10,
+        min_height_mm=10,
+        max_height_mm=10,
+        min_horizontal_gap_mm=10,
+        max_horizontal_gap_mm=10,
+        min_vertical_gap_mm=10,
+        max_vertical_gap_mm=10,
+        margin_mm=5,
+        inner_margin_mm=5,
+        seed=456,
+        opening_shape_factory=lambda width, height: make_opening_shape(
+            "slot", width, height
+        ),
+    )
+
+    row_right_of_opening = [
+        translate(shape, xoff=x, yoff=y)
+        for x, y, shape in holes
+        if abs(y + shape.centroid.y - 130) < 1e-6
+        and x + shape.centroid.x > 150
+    ]
+
+    assert row_right_of_opening
+    closest = min(row_right_of_opening, key=lambda shape: shape.bounds[0])
+    assert closest.distance(inner_opening) == pytest.approx(5, abs=1)
+
+
 def test_random_hole_generation_reports_progress_and_can_be_cancelled():
     plate = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
     progress: list[int] = []
