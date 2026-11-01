@@ -1299,16 +1299,18 @@ class MainWindow(QMainWindow):
             or not self._random_result_current
         ):
             return
-        filename = self.output_path.text().strip()
-        if not filename:
-            self._choose_output()
-            filename = self.output_path.text().strip()
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Zapisz perforowany detal",
+            self.output_path.text().strip(),
+            "Pliki DXF (*.dxf)",
+        )
         if not filename:
             return
         destination = Path(filename)
         if destination.suffix.lower() != ".dxf":
             destination = destination.with_suffix(".dxf")
-            self.output_path.setText(str(destination))
+        self.output_path.setText(str(destination))
         if self.source_path and destination.resolve() == self.source_path.resolve():
             QMessageBox.warning(
                 self,
