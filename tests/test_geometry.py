@@ -444,6 +444,75 @@ def test_target_directed_random_parameters_approach_highest_feasible_open_area()
     assert open_area < 50
 
 
+def test_target_directed_sampling_does_not_force_maximum_width_when_spacing_varies():
+    material = Polygon([(0, 0), (300, 0), (300, 300), (0, 300)])
+
+    holes = generate_random_holes(
+        material,
+        make_opening_shape("rectangle", 10, 10),
+        target_open_area_percentage=60,
+        min_width_mm=10,
+        max_width_mm=200,
+        min_height_mm=10,
+        max_height_mm=10,
+        min_horizontal_gap_mm=10,
+        max_horizontal_gap_mm=10,
+        min_vertical_gap_mm=2,
+        max_vertical_gap_mm=40,
+        margin_mm=2,
+        seed=20261101,
+    )
+
+    widths = [shape.bounds[2] - shape.bounds[0] for _, _, shape in holes]
+    open_area = sum(shape.area for _, _, shape in holes) / material.area * 100
+    assert len(widths) > 20
+    assert sum(widths) / len(widths) < 100
+    assert max(widths) < 150
+    assert open_area > 45
+
+
+def test_target_directed_sampling_stays_below_width_max_on_u_shaped_part():
+    material = Polygon(
+        [
+            (0, 0),
+            (1620, 0),
+            (1620, 1320),
+            (1400, 1320),
+            (1400, 570),
+            (220, 570),
+            (220, 1320),
+            (0, 1320),
+        ],
+        holes=[
+            list(Point(810, 390).buffer(100).exterior.coords),
+            list(Point(100, 100).buffer(25).exterior.coords),
+        ],
+    )
+
+    holes = generate_random_holes(
+        material,
+        make_opening_shape("rectangle", 10, 10),
+        target_open_area_percentage=60,
+        min_width_mm=10,
+        max_width_mm=200,
+        min_height_mm=10,
+        max_height_mm=10,
+        min_horizontal_gap_mm=10,
+        max_horizontal_gap_mm=10,
+        min_vertical_gap_mm=2,
+        max_vertical_gap_mm=40,
+        margin_mm=10,
+        inner_margin_mm=10,
+        seed=20261101,
+    )
+
+    widths = [shape.bounds[2] - shape.bounds[0] for _, _, shape in holes]
+    open_area = sum(shape.area for _, _, shape in holes) / material.area * 100
+    assert sum(widths) / len(widths) < 80
+    assert max(widths) < 130
+    assert open_area > 54
+
+
 def test_random_holes_adjust_variable_final_size_to_reach_open_area_target():
     material = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
 

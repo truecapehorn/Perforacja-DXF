@@ -146,8 +146,9 @@ Wymiary kształtów i odstępy podaje się w milimetrach.
   prześwitu. Można ustawić docelowy stopień prześwitu,
   wybrać niezależnie losowanie szerokości, wysokości oraz odstępu poziomego
   i pionowego, podając zakres min–max każdego losowanego parametru.
-  Losowane wymiary i odstępy są dobierane z uwzględnieniem celu prześwitu;
-  otwory są rozmieszczane osobno w dostępnych odcinkach każdego rzędu.
+  Losowane wymiary i odstępy są dobierane z uwzględnieniem celu prześwitu,
+  z równoważeniem udziału obu osi zamiast ciągłego wybierania maksymalnego
+  wymiaru. Otwory są rozmieszczane osobno w dostępnych odcinkach każdego rzędu.
   Niezaznaczone wymiary są stałe i wynikają z ustawionego kształtu otworu;
   niezaznaczony odstęp korzysta z parametru odstępu z trybu siatki. Układ jest
   przeliczany wyłącznie po kliknięciu

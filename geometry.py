@@ -355,7 +355,7 @@ def generate_random_holes(
         raise ValueError("Kształt otworu nie ma prawidłowej szerokości.")
     if base_height <= 0:
         raise ValueError("Kształt otworu nie ma prawidłowej wysokości.")
-    rows: list[list[tuple[float, float, BaseGeometry]]] = []
+    rows: list[list[list[tuple[float, float, BaseGeometry]]]] = []
     prepared = prep(allowed)
     generator = random.Random(seed)
     area_target = material.area * target_open_area_percentage / 100
@@ -393,6 +393,14 @@ def generate_random_holes(
                 high = middle
         return (low + high) / 2
 
+    def sample_factor(target_factor: float) -> float:
+        concentration = 40.0
+        target_factor = min(1.0, max(0.0, target_factor))
+        return generator.betavariate(
+            max(target_factor * concentration, 2.0),
+            max((1 - target_factor) * concentration, 2.0),
+        )
+
     def sample_axis(
         min_size: float,
         max_size: float,
@@ -400,23 +408,33 @@ def generate_random_holes(
         max_gap: float,
         target_factor: float,
     ) -> tuple[float, float]:
-        concentration = 40.0
-        factor = generator.betavariate(
-            1 + target_factor * concentration,
-            1 + (1 - target_factor) * concentration,
-        )
+        factor = sample_factor(target_factor)
         return (
             min_size + (max_size - min_size) * factor,
             max_gap - (max_gap - min_gap) * factor,
         )
 
     target_fraction = target_open_area_percentage / 100
+    minimum_horizontal_density = axis_density(
+        0.0,
+        min_width_mm,
+        max_width_mm,
+        min_horizontal_gap_mm,
+        max_horizontal_gap_mm,
+    )
     max_horizontal_density = axis_density(
         1.0,
         min_width_mm,
         max_width_mm,
         min_horizontal_gap_mm,
         max_horizontal_gap_mm,
+    )
+    minimum_vertical_density = axis_density(
+        0.0,
+        min_height_mm,
+        max_height_mm,
+        min_vertical_gap_mm,
+        max_vertical_gap_mm,
     )
     max_vertical_density = axis_density(
         1.0,
@@ -425,27 +443,51 @@ def generate_random_holes(
         min_vertical_gap_mm,
         max_vertical_gap_mm,
     )
+    balanced_density = min(1.0, math.sqrt(target_fraction) * 1.1)
+    target_horizontal_density = min(
+        max_horizontal_density,
+        max(minimum_horizontal_density, balanced_density),
+    )
     target_vertical_density = min(
         max_vertical_density,
-        target_fraction / max_horizontal_density,
+        max(minimum_vertical_density, balanced_density),
     )
+    if target_horizontal_density * target_vertical_density < target_fraction:
+        low_scale, high_scale = 1.0, 2.0
+        while (
+            min(max_horizontal_density, target_horizontal_density * high_scale)
+            * min(max_vertical_density, target_vertical_density * high_scale)
+            < target_fraction
+            and high_scale < 1_000_000
+        ):
+            high_scale *= 2
+        for _ in range(40):
+            middle_scale = (low_scale + high_scale) / 2
+            candidate_horizontal = min(
+                max_horizontal_density,
+                target_horizontal_density * middle_scale,
+            )
+            candidate_vertical = min(
+                max_vertical_density,
+                target_vertical_density * middle_scale,
+            )
+            if candidate_horizontal * candidate_vertical < target_fraction:
+                low_scale = middle_scale
+            else:
+                high_scale = middle_scale
+        target_horizontal_density = min(
+            max_horizontal_density, target_horizontal_density * high_scale
+        )
+        target_vertical_density = min(
+            max_vertical_density, target_vertical_density * high_scale
+        )
+
     vertical_factor = factor_for_density(
         target_vertical_density,
         min_height_mm,
         max_height_mm,
         min_vertical_gap_mm,
         max_vertical_gap_mm,
-    )
-    estimated_vertical_density = axis_density(
-        vertical_factor,
-        min_height_mm,
-        max_height_mm,
-        min_vertical_gap_mm,
-        max_vertical_gap_mm,
-    )
-    target_horizontal_density = min(
-        max_horizontal_density,
-        target_fraction / estimated_vertical_density,
     )
     horizontal_factor = factor_for_density(
         target_horizontal_density,
@@ -481,7 +523,6 @@ def generate_random_holes(
     while row_bottom < allowed_max_y and attempts < MAX_RANDOM_CANDIDATES:
         if cancellation_requested is not None and cancellation_requested():
             raise InterruptedError("Losowanie zostało anulowane.")
-        row_shapes: list[tuple[BaseGeometry, BaseGeometry, float, float]] = []
         row_height = 0.0
         scan_y = row_bottom + nominal_row_height / 2
         scanline = LineString(
@@ -498,7 +539,11 @@ def generate_random_holes(
             for part in line_parts
             if part.geom_type == "LineString" and part.length > 1e-8
         )
+        placed_row_segments = []
         for interval_min_x, interval_max_x in intervals:
+            row_shapes: list[
+                tuple[BaseGeometry, BaseGeometry, float, float]
+            ] = []
             cursor_x = interval_min_x
             while (
                 cursor_x < interval_max_x
@@ -530,10 +575,7 @@ def generate_random_holes(
                     max_horizontal_gap_mm,
                     local_horizontal_factor,
                 )
-                height_sample = generator.betavariate(
-                    1 + vertical_factor * 40,
-                    1 + (1 - vertical_factor) * 40,
-                )
+                height_sample = sample_factor(vertical_factor)
                 height_mm = min_height_mm + (
                     max_height_mm - min_height_mm
                 ) * height_sample
@@ -573,22 +615,26 @@ def generate_random_holes(
                 )
                 row_height = max(row_height, shape_height)
                 cursor_x += shape_width + horizontal_gap
+            if row_shapes:
+                placed_segment: list[
+                    tuple[float, float, BaseGeometry]
+                ] = []
+                for hole_shape, oriented_shape, cursor_x, _shape_width in row_shapes:
+                    shape_bounds = oriented_shape.bounds
+                    x = cursor_x - shape_bounds[0]
+                    y = row_bottom - shape_bounds[1]
+                    translated = translate(oriented_shape, xoff=x, yoff=y)
+                    if prepared.covers(translated):
+                        placed_segment.append((x, y, hole_shape))
+                if placed_segment:
+                    placed_row_segments.append(placed_segment)
 
         if row_height <= 0:
             row_height = nominal_row_height
         if row_height <= 0:
             break
-        placed_row: list[tuple[float, float, BaseGeometry]] = []
-        for hole_shape, oriented_shape, cursor_x, _shape_width in row_shapes:
-            shape_bounds = oriented_shape.bounds
-            x = cursor_x - shape_bounds[0]
-            y = row_bottom - shape_bounds[1]
-            translated = translate(oriented_shape, xoff=x, yoff=y)
-            if not prepared.covers(translated):
-                continue
-            placed_row.append((x, y, hole_shape))
-        if placed_row:
-            rows.append(placed_row)
+        if placed_row_segments:
+            rows.append(placed_row_segments)
         _row_height_sample, vertical_gap = sample_axis(
             min_height_mm,
             max_height_mm,
@@ -611,24 +657,29 @@ def generate_random_holes(
     if not rows:
         return []
 
-    row_representatives = []
-    row_expansions = []
+    row_representatives: list[list[tuple[float, float, BaseGeometry]]] = []
+    row_expansions: list[list[list[tuple[float, float, BaseGeometry]]]] = []
     for row in rows:
-        start_index = generator.randrange(len(row))
-        row_representatives.append(row[start_index])
-        left_index = start_index - 1
-        right_index = start_index + 1
-        expansion = []
-        while left_index >= 0 or right_index < len(row):
-            if left_index >= 0 and (
-                right_index >= len(row) or generator.random() < 0.5
-            ):
-                expansion.append(row[left_index])
-                left_index -= 1
-            else:
-                expansion.append(row[right_index])
-                right_index += 1
-        row_expansions.append(expansion)
+        representatives = []
+        segment_expansions = []
+        for segment in row:
+            start_index = generator.randrange(len(segment))
+            representatives.append(segment[start_index])
+            left_index = start_index - 1
+            right_index = start_index + 1
+            expansion = []
+            while left_index >= 0 or right_index < len(segment):
+                if left_index >= 0 and (
+                    right_index >= len(segment) or generator.random() < 0.5
+                ):
+                    expansion.append(segment[left_index])
+                    left_index -= 1
+                else:
+                    expansion.append(segment[right_index])
+                    right_index += 1
+            segment_expansions.append(expansion)
+        row_representatives.append(representatives)
+        row_expansions.append(segment_expansions)
     coverage_row_count = min(len(rows), MAX_HOLES)
     while coverage_row_count > 1:
         row_indices = [
@@ -636,7 +687,9 @@ def generate_random_holes(
             for index in range(coverage_row_count)
         ]
         coverage_area = sum(
-            row_representatives[index][2].area for index in row_indices
+            hole[2].area
+            for index in row_indices
+            for hole in row_representatives[index]
         )
         if coverage_area <= area_target:
             break
@@ -644,22 +697,37 @@ def generate_random_holes(
     if coverage_row_count == 1:
         row_indices = [round((len(rows) - 1) / 2)]
 
-    placed = [row_representatives[index] for index in row_indices]
-    placed_row_indices = list(row_indices)
+    placed = [
+        hole
+        for index in row_indices
+        for hole in row_representatives[index]
+    ]
+    placed_row_indices = [
+        index for index in row_indices for _hole in row_representatives[index]
+    ]
     area_current = sum(hole[2].area for hole in placed)
 
-    remaining_by_row = [row_expansions[index] for index in row_indices]
-    next_hole_by_row = [0] * len(remaining_by_row)
+    remaining_by_segment = [
+        segment
+        for index in row_indices
+        for segment in row_expansions[index]
+    ]
+    segment_row_indices = [
+        index
+        for index in row_indices
+        for _segment in row_expansions[index]
+    ]
+    next_hole_by_segment = [0] * len(remaining_by_segment)
     while area_current < area_target and len(placed) < MAX_HOLES:
         added_hole = False
-        for index, row_holes in enumerate(remaining_by_row):
-            next_hole = next_hole_by_row[index]
+        for index, row_holes in enumerate(remaining_by_segment):
+            next_hole = next_hole_by_segment[index]
             if next_hole >= len(row_holes) or len(placed) >= MAX_HOLES:
                 continue
             hole = row_holes[next_hole]
-            next_hole_by_row[index] += 1
+            next_hole_by_segment[index] += 1
             placed.append(hole)
-            placed_row_indices.append(row_indices[index])
+            placed_row_indices.append(segment_row_indices[index])
             area_current += hole[2].area
             added_hole = True
             if area_current >= area_target or len(placed) >= MAX_HOLES:
