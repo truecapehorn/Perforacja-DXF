@@ -404,6 +404,35 @@ def test_random_holes_cover_full_height_of_u_shaped_material():
     assert any(shape.centroid.x > 80 for shape in placed if shape.centroid.y > 80)
 
 
+def test_random_holes_adjust_variable_final_size_to_reach_open_area_target():
+    material = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+
+    holes = generate_random_holes(
+        material,
+        make_opening_shape("rectangle", 10, 8),
+        target_open_area_percentage=13.37,
+        min_width_mm=6,
+        max_width_mm=14,
+        min_height_mm=8,
+        max_height_mm=8,
+        min_horizontal_gap_mm=1,
+        max_horizontal_gap_mm=3,
+        min_vertical_gap_mm=1,
+        max_vertical_gap_mm=3,
+        margin_mm=2,
+        seed=456,
+    )
+
+    actual_percentage = (
+        sum(shape.area for _, _, shape in holes) / material.area * 100
+    )
+    assert actual_percentage == pytest.approx(13.37, abs=1e-8)
+    assert all(
+        6 <= shape.bounds[2] - shape.bounds[0] <= 14
+        for _, _, shape in holes
+    )
+
+
 def test_random_hole_generation_reports_progress_and_can_be_cancelled():
     plate = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
     progress: list[int] = []

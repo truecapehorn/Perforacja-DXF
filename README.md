@@ -152,7 +152,9 @@ Wymiary kształtów i odstępy podaje się w milimetrach.
   **Losuj losowy układ**. Podczas obliczeń działa okno postępu z możliwością
   anulowania, a interfejs pozostaje responsywny. Przy ograniczonym
   miejscu lub dużym odstępie osiągnięty prześwit może różnić się od celu;
-  pasek statusu pokazuje wynik i informuje o niedopasowaniu.
+  jeśli zakres wymiaru na to pozwala, program dopasowuje rozmiar ostatniego
+  otworu do celu bez przekraczania zakresu i naruszania odstępów. Pasek statusu
+  pokazuje wynik i informuje o niedopasowaniu.
 - **Tryb odległości — odstęp między krawędziami** oznacza minimalną
   szczelinę pomiędzy obrysami sąsiednich otworów. Program dobiera podziałkę
   na podstawie rzeczywistego kształtu i sprawdza, czy otwory nie zachodzą

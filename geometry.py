@@ -461,6 +461,7 @@ def generate_random_holes(
         row_indices = [round((len(rows) - 1) / 2)]
 
     placed = [row_representatives[index] for index in row_indices]
+    placed_row_indices = list(row_indices)
     area_current = sum(hole[2].area for hole in placed)
 
     remaining_by_row = [row_expansions[index] for index in row_indices]
@@ -474,6 +475,7 @@ def generate_random_holes(
             hole = row_holes[next_hole]
             next_hole_by_row[index] += 1
             placed.append(hole)
+            placed_row_indices.append(row_indices[index])
             area_current += hole[2].area
             added_hole = True
             if area_current >= area_target or len(placed) >= MAX_HOLES:
@@ -486,6 +488,90 @@ def generate_random_holes(
         area_current - placed[-1][2].area
     ):
         area_current -= placed.pop()[2].area
+        placed_row_indices.pop()
+
+    if placed and not math.isclose(area_current, area_target, abs_tol=1e-8):
+        first_adjustment_candidate = max(0, len(placed) - 16)
+        for hole_index in range(
+            len(placed) - 1, first_adjustment_candidate - 1, -1
+        ):
+            x, y, hole_shape = placed[hole_index]
+            min_x, min_y, max_x, max_y = hole_shape.bounds
+            current_width = max_x - min_x
+            current_height = max_y - min_y
+            desired_area = area_target - area_current + hole_shape.area
+            if desired_area <= 0 or hole_shape.area <= 0:
+                continue
+            area_ratio = desired_area / hole_shape.area
+            preserve_proportions = (
+                min_width_mm == min_height_mm
+                and max_width_mm == max_height_mm
+            )
+            scale_options: list[tuple[float, float]] = []
+            if min_width_mm < max_width_mm and min_height_mm < max_height_mm:
+                scale_options.append(
+                    (math.sqrt(area_ratio), math.sqrt(area_ratio))
+                )
+            if not preserve_proportions:
+                if min_width_mm < max_width_mm:
+                    scale_options.append((area_ratio, 1.0))
+                if min_height_mm < max_height_mm:
+                    scale_options.append((1.0, area_ratio))
+            for width_factor, height_factor in scale_options:
+                new_width = current_width * width_factor
+                new_height = current_height * height_factor
+                if not (
+                    min_width_mm - 1e-7
+                    <= new_width
+                    <= max_width_mm + 1e-7
+                    and min_height_mm - 1e-7
+                    <= new_height
+                    <= max_height_mm + 1e-7
+                ):
+                    continue
+                adjusted_shape = scale(
+                    hole_shape,
+                    xfact=width_factor,
+                    yfact=height_factor,
+                    origin=(0, 0),
+                )
+                adjusted_position = translate(
+                    rotate(adjusted_shape, angle_degrees, origin=(0, 0)),
+                    xoff=x,
+                    yoff=y,
+                )
+                if not prepared.covers(adjusted_position):
+                    continue
+                row_index = placed_row_indices[hole_index]
+                valid_spacing = True
+                for other_index, (other_x, other_y, other_shape) in enumerate(
+                    placed
+                ):
+                    if other_index == hole_index:
+                        continue
+                    other_position = translate(
+                        rotate(other_shape, angle_degrees, origin=(0, 0)),
+                        xoff=other_x,
+                        yoff=other_y,
+                    )
+                    required_gap = (
+                        min_horizontal_gap_mm
+                        if placed_row_indices[other_index] == row_index
+                        else min_vertical_gap_mm
+                    )
+                    if (
+                        adjusted_position.distance(other_position)
+                        < required_gap - 1e-7
+                    ):
+                        valid_spacing = False
+                        break
+                if not valid_spacing:
+                    continue
+                placed[hole_index] = (x, y, adjusted_shape)
+                area_current += adjusted_shape.area - hole_shape.area
+                break
+            if math.isclose(area_current, area_target, abs_tol=1e-8):
+                break
     if progress_callback is not None:
         progress_callback(100)
     return placed
