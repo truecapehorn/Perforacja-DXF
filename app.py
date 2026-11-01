@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import sys
 from pathlib import Path
 
@@ -38,6 +39,7 @@ from geometry import (
     Drawing,
     export_dxf,
     generate_holes,
+    generate_random_holes,
     load_dxf,
     material_clearance,
     make_opening_shape,
@@ -120,6 +122,7 @@ class Preview(QWidget):
         opening_type: str = "circle",
         inner_margin: float | None = None,
         opening_angle: float = 0.0,
+        hole_openings: list[BaseGeometry] | None = None,
     ) -> None:
         self.material = material
         self.holes = holes or []
@@ -128,6 +131,7 @@ class Preview(QWidget):
         self.margin = margin
         self.angle = angle + opening_angle
         self.inner_margin = margin if inner_margin is None else inner_margin
+        self.hole_openings = hole_openings or []
         self.update()
 
     def paintEvent(self, _event) -> None:
@@ -175,7 +179,14 @@ class Preview(QWidget):
         if self.holes and self.opening_shape is not None:
             painter.setPen(Qt.NoPen)
             painter.setBrush(QColor("#16c9df"))
-            if self.opening_type == "circle":
+            if self.hole_openings:
+                for (x, y), opening in zip(self.holes, self.hole_openings):
+                    painter.save()
+                    painter.translate(x, y)
+                    painter.rotate(self.angle)
+                    painter.drawPath(_geometry_path(opening))
+                    painter.restore()
+            elif self.opening_type == "circle":
                 radius = (
                     self.opening_shape.bounds[2]
                     - self.opening_shape.bounds[0]
@@ -243,8 +254,10 @@ class MainWindow(QMainWindow):
         self.preview_material: BaseGeometry | None = None
         self.preview_holes: list[tuple[float, float]] = []
         self.preview_opening: BaseGeometry | None = None
+        self.preview_hole_shapes: list[BaseGeometry] = []
         self.custom_opening: BaseGeometry | None = None
         self.custom_opening_warnings: tuple[str, ...] = ()
+        self.random_seed = secrets.randbits(32)
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -375,10 +388,15 @@ class MainWindow(QMainWindow):
 
         section("UKŁAD I OTWORY")
         form = QFormLayout()
+        self.layout_mode_input = QComboBox()
+        self.layout_mode_input.addItem("Regularna siatka", "grid")
+        self.layout_mode_input.addItem("Losowy", "random")
+        form.addRow("Rozmieszczenie:", self.layout_mode_input)
         self.pattern_input = QComboBox()
         self.pattern_input.addItem("Prosty (kwadratowy)", "square")
         self.pattern_input.addItem("Mijankowy", "staggered")
-        form.addRow("Układ:", self.pattern_input)
+        self.pattern_label = QLabel("Układ:")
+        form.addRow(self.pattern_label, self.pattern_input)
         self.opening_type_input = QComboBox()
         self.opening_type_input.addItem("Koło", "circle")
         self.opening_type_input.addItem("Kwadrat", "square")
@@ -418,19 +436,22 @@ class MainWindow(QMainWindow):
         self.spacing_mode = QComboBox()
         self.spacing_mode.addItem("Odstęp między krawędziami", "gap")
         self.spacing_mode.addItem("Podziałka osiowa", "pitch")
-        form.addRow("Tryb odległości:", self.spacing_mode)
+        self.spacing_mode_label = QLabel("Tryb odległości:")
+        form.addRow(self.spacing_mode_label, self.spacing_mode)
         self.angle_input = QDoubleSpinBox()
         self.angle_input.setDecimals(1)
         self.angle_input.setRange(-180.0, 180.0)
         self.angle_input.setSingleStep(5.0)
         self.angle_input.setSuffix("°")
-        form.addRow("Kąt siatki:", self.angle_input)
+        self.angle_label = QLabel("Kąt siatki:")
+        form.addRow(self.angle_label, self.angle_input)
         self.opening_angle_input = QDoubleSpinBox()
         self.opening_angle_input.setDecimals(1)
         self.opening_angle_input.setRange(-180.0, 180.0)
         self.opening_angle_input.setSingleStep(5.0)
         self.opening_angle_input.setSuffix("°")
-        form.addRow("Kąt kształtu względem siatki:", self.opening_angle_input)
+        self.opening_angle_label = QLabel("Kąt kształtu względem siatki:")
+        form.addRow(self.opening_angle_label, self.opening_angle_input)
         self.margin_input = _parameter_input(10.0, 0.0, 5000.0)
         form.addRow("Margines od krawędzi zewnętrznej:", self.margin_input)
         self.inner_margin_input = _parameter_input(10.0, 0.0, 5000.0)
@@ -438,6 +459,25 @@ class MainWindow(QMainWindow):
             "Margines od krawędzi wewnętrznej / wyspy:",
             self.inner_margin_input,
         )
+        self.target_open_area_input = _parameter_input(30.0, 0.1, 99.9, 1.0)
+        self.target_open_area_input.setSuffix(" %")
+        self.random_target_label = QLabel("Docelowy prześwit:")
+        form.addRow(self.random_target_label, self.target_open_area_input)
+        self.randomize_size_input = QCheckBox("Losuj rozmiary otworów")
+        self.randomize_size_input.setChecked(True)
+        self.randomize_size_label = QLabel("Rozmiary:")
+        form.addRow(self.randomize_size_label, self.randomize_size_input)
+        self.random_min_size_input = _parameter_input(10.0, 0.1, 5000.0)
+        self.random_min_size_label = QLabel("Minimalna długość / rozmiar:")
+        form.addRow(self.random_min_size_label, self.random_min_size_input)
+        self.random_max_size_input = _parameter_input(20.0, 0.1, 5000.0)
+        self.random_max_size_label = QLabel("Maksymalna długość / rozmiar:")
+        form.addRow(self.random_max_size_label, self.random_max_size_input)
+        self.random_min_gap_input = _parameter_input(2.0, 0.0, 10_000.0)
+        self.random_min_gap_label = QLabel("Minimalny odstęp otworów:")
+        form.addRow(self.random_min_gap_label, self.random_min_gap_input)
+        self.regenerate_random_button = QPushButton("Losuj nowy układ")
+        form.addRow(self.regenerate_random_button)
         layout.addLayout(form)
 
         section("PLIK WYJŚCIOWY")
@@ -463,6 +503,7 @@ class MainWindow(QMainWindow):
         for field in (
             self.width_input,
             self.height_input,
+            self.layout_mode_input,
             self.pattern_input,
             self.opening_width_input,
             self.opening_height_input,
@@ -472,14 +513,24 @@ class MainWindow(QMainWindow):
             self.opening_angle_input,
             self.margin_input,
             self.inner_margin_input,
+            self.target_open_area_input,
+            self.random_min_size_input,
+            self.random_max_size_input,
+            self.random_min_gap_input,
         ):
             field.valueChanged.connect(self._refresh) if isinstance(
                 field, QDoubleSpinBox
             ) else field.currentIndexChanged.connect(self._refresh)
+        self.layout_mode_input.currentIndexChanged.connect(
+            self._update_random_controls
+        )
         self.opening_type_input.currentIndexChanged.connect(
             self._opening_type_changed
         )
         self.polygon_sides_input.valueChanged.connect(self._refresh)
+        self.randomize_size_input.toggled.connect(self._random_size_changed)
+        self.regenerate_random_button.clicked.connect(self._regenerate_random)
+        self._random_size_changed()
         self._update_opening_controls()
         return panel
 
@@ -524,6 +575,7 @@ class MainWindow(QMainWindow):
         fields = (
             self.width_input,
             self.height_input,
+            self.layout_mode_input,
             self.pattern_input,
             self.opening_type_input,
             self.opening_width_input,
@@ -536,6 +588,11 @@ class MainWindow(QMainWindow):
             self.margin_input,
             self.inner_margin_input,
             self.perforation_export_input,
+            self.target_open_area_input,
+            self.randomize_size_input,
+            self.random_min_size_input,
+            self.random_max_size_input,
+            self.random_min_gap_input,
         )
         previous_signal_states = [
             (field, field.blockSignals(True)) for field in fields
@@ -543,6 +600,9 @@ class MainWindow(QMainWindow):
         try:
             self.width_input.setValue(settings.width_mm)
             self.height_input.setValue(settings.height_mm)
+            self.layout_mode_input.setCurrentIndex(
+                self.layout_mode_input.findData(settings.layout_mode)
+            )
             self.pattern_input.setCurrentIndex(
                 self.pattern_input.findData(settings.pattern)
             )
@@ -560,6 +620,16 @@ class MainWindow(QMainWindow):
             self.opening_angle_input.setValue(settings.opening_angle_degrees)
             self.margin_input.setValue(settings.outer_margin_mm)
             self.inner_margin_input.setValue(settings.inner_margin_mm)
+            self.target_open_area_input.setValue(
+                settings.target_open_area_percentage
+            )
+            self.randomize_size_input.setChecked(
+                settings.randomize_opening_size
+            )
+            self.random_min_size_input.setValue(settings.random_min_size_mm)
+            self.random_max_size_input.setValue(settings.random_max_size_mm)
+            self.random_min_gap_input.setValue(settings.random_min_gap_mm)
+            self.random_seed = settings.random_seed
             self.perforation_export_input.setCurrentIndex(
                 self.perforation_export_input.findData(
                     settings.perforation_as_block
@@ -576,6 +646,7 @@ class MainWindow(QMainWindow):
             for field, previous_state in previous_signal_states:
                 field.blockSignals(previous_state)
         self._opening_type_changed()
+        self._update_random_controls()
 
     def _choose_output(self) -> None:
         filename, _ = QFileDialog.getSaveFileName(
@@ -593,6 +664,47 @@ class MainWindow(QMainWindow):
     def _opening_type_changed(self, *_args) -> None:
         self._update_opening_controls()
         self._refresh()
+
+    def _random_size_changed(self, *_args) -> None:
+        self._update_random_controls()
+        self._refresh()
+
+    def _regenerate_random(self) -> None:
+        self.random_seed = secrets.randbits(32)
+        self._refresh()
+
+    def _update_random_controls(self) -> None:
+        is_random = self.layout_mode_input.currentData() == "random"
+        random_size = is_random and self.randomize_size_input.isChecked()
+        for widget in (
+            self.random_target_label,
+            self.target_open_area_input,
+            self.randomize_size_label,
+            self.randomize_size_input,
+            self.random_min_gap_label,
+            self.random_min_gap_input,
+            self.regenerate_random_button,
+        ):
+            widget.setVisible(is_random)
+        for widget in (
+            self.random_min_size_label,
+            self.random_min_size_input,
+            self.random_max_size_label,
+            self.random_max_size_input,
+        ):
+            widget.setVisible(random_size)
+        self.pattern_input.setVisible(not is_random)
+        self.pattern_label.setVisible(not is_random)
+        self.spacing_label.setVisible(not is_random)
+        self.spacing_input.setVisible(not is_random)
+        self.spacing_mode_label.setVisible(not is_random)
+        self.spacing_mode.setVisible(not is_random)
+        self.angle_label.setText(
+            "Kąt otworów:" if is_random else "Kąt siatki:"
+        )
+        self.opening_angle_label.setVisible(not is_random)
+        self.opening_angle_input.setVisible(not is_random)
+        self._update_opening_controls()
 
     def _update_opening_controls(self) -> None:
         opening_type = self.opening_type_input.currentData()
@@ -620,6 +732,12 @@ class MainWindow(QMainWindow):
         self.custom_opening_name.setVisible(show_custom)
         self.custom_opening_row.setVisible(show_custom)
         self.custom_opening_row_label.setVisible(show_custom)
+        if opening_type == "slot":
+            self.random_min_size_label.setText("Minimalna długość fasolki:")
+            self.random_max_size_label.setText("Maksymalna długość fasolki:")
+        else:
+            self.random_min_size_label.setText("Minimalny rozmiar otworu:")
+            self.random_max_size_label.setText("Maksymalny rozmiar otworu:")
 
     def _choose_opening_shape(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -683,21 +801,52 @@ class MainWindow(QMainWindow):
                 self.polygon_sides_input.value(),
                 self.custom_opening,
             )
-            holes = generate_holes(
-                material,
-                opening_shape,
-                self.spacing_input.value(),
-                self.margin_input.value(),
-                self.angle_input.value(),
-                self.pattern_input.currentData(),
-                self.spacing_mode.currentData(),
-                inner_margin_mm=self.inner_margin_input.value(),
-                opening_angle_degrees=self.opening_angle_input.value(),
-            )
+            if self.layout_mode_input.currentData() == "random":
+                min_size = (
+                    self.random_min_size_input.value()
+                    if self.randomize_size_input.isChecked()
+                    else self.opening_width_input.value()
+                )
+                max_size = (
+                    self.random_max_size_input.value()
+                    if self.randomize_size_input.isChecked()
+                    else self.opening_width_input.value()
+                )
+                generated = generate_random_holes(
+                    material,
+                    opening_shape,
+                    self.target_open_area_input.value(),
+                    min_size,
+                    max_size,
+                    self.random_min_gap_input.value(),
+                    self.margin_input.value(),
+                    inner_margin_mm=self.inner_margin_input.value(),
+                    angle_degrees=self.angle_input.value(),
+                    vary_length_only=(
+                        self.opening_type_input.currentData() == "slot"
+                    ),
+                    seed=self.random_seed,
+                )
+                holes = [(hole[0], hole[1]) for hole in generated]
+                hole_shapes = [hole[2] for hole in generated]
+            else:
+                holes = generate_holes(
+                    material,
+                    opening_shape,
+                    self.spacing_input.value(),
+                    self.margin_input.value(),
+                    self.angle_input.value(),
+                    self.pattern_input.currentData(),
+                    self.spacing_mode.currentData(),
+                    inner_margin_mm=self.inner_margin_input.value(),
+                    opening_angle_degrees=self.opening_angle_input.value(),
+                )
+                hole_shapes = []
         except ValueError as error:
             self.preview_material = None
             self.preview_holes = []
             self.preview_opening = None
+            self.preview_hole_shapes = []
             self.output_preview.set_data(None)
             self.export_button.setEnabled(False)
             self.status.setText(str(error))
@@ -706,6 +855,7 @@ class MainWindow(QMainWindow):
         self.preview_material = material
         self.preview_holes = holes
         self.preview_opening = opening_shape
+        self.preview_hole_shapes = hole_shapes
         self.output_preview.set_data(
             material,
             holes,
@@ -714,19 +864,33 @@ class MainWindow(QMainWindow):
             self.angle_input.value(),
             self.opening_type_input.currentData(),
             self.inner_margin_input.value(),
-            self.opening_angle_input.value(),
+            (
+                0.0
+                if self.layout_mode_input.currentData() == "random"
+                else self.opening_angle_input.value()
+            ),
+            hole_shapes,
         )
         self.export_button.setEnabled(bool(holes))
         self.status.setStyleSheet("color: #9aa9bd;")
         min_x, min_y, max_x, max_y = material.bounds
-        open_area = open_area_percentage(
-            material, len(holes), opening_shape
+        open_area = (
+            sum(shape.area for shape in hole_shapes) / material.area * 100
+            if hole_shapes
+            else open_area_percentage(material, len(holes), opening_shape)
         )
         messages = [
             f"Wymiary: {max_x - min_x:.1f} × {max_y - min_y:.1f} mm",
             f"Liczba otworów: {len(holes):,}",
             f"Stopień prześwitu: {open_area:.1f}%",
         ]
+        if self.layout_mode_input.currentData() == "random":
+            target = self.target_open_area_input.value()
+            messages.append(f"Cel prześwitu: {target:.1f}%")
+            if abs(open_area - target) > 0.5:
+                messages.append(
+                    "Nie osiągnięto celu; zmień zakres rozmiaru lub odstęp."
+                )
         messages.extend(self.drawing.warnings)
         if self.opening_type_input.currentData() == "custom":
             messages.extend(self.custom_opening_warnings)
@@ -784,8 +948,13 @@ class MainWindow(QMainWindow):
                 self.preview_opening,
                 self.opening_type_input.currentData(),
                 self.angle_input.value(),
-                self.opening_angle_input.value(),
+                (
+                    0.0
+                    if self.layout_mode_input.currentData() == "random"
+                    else self.opening_angle_input.value()
+                ),
                 self.perforation_export_input.currentData(),
+                self.preview_hole_shapes or None,
             )
         except (OSError, ezdxf.DXFError, ValueError) as error:
             QMessageBox.critical(self, "Nie można zapisać DXF", str(error))
@@ -825,6 +994,13 @@ class MainWindow(QMainWindow):
             outer_margin_mm=self.margin_input.value(),
             inner_margin_mm=self.inner_margin_input.value(),
             perforation_as_block=self.perforation_export_input.currentData(),
+            layout_mode=self.layout_mode_input.currentData(),
+            target_open_area_percentage=self.target_open_area_input.value(),
+            randomize_opening_size=self.randomize_size_input.isChecked(),
+            random_min_size_mm=self.random_min_size_input.value(),
+            random_max_size_mm=self.random_max_size_input.value(),
+            random_min_gap_mm=self.random_min_gap_input.value(),
+            random_seed=self.random_seed,
             custom_opening=(
                 self.custom_opening if opening_type == "custom" else None
             ),

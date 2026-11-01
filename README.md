@@ -140,6 +140,14 @@ Wymiary kształtów i odstępy podaje się w milimetrach.
 - **Układ prosty (kwadratowy)** rozmieszcza środki otworów w równych
   odstępach poziomo i pionowo.
 - **Układ mijankowy** przesuwa co drugi rząd o połowę podziałki.
+- **Układ losowy** rozmieszcza otwory w losowych miejscach, bez nakładania i
+  z zachowaniem marginesów. Można ustawić docelowy stopień prześwitu,
+  minimalny odstęp oraz włączyć losowanie rozmiaru z zakresu min–max.
+  Dla fasolki losowana jest jej długość, a szerokość pozostaje stała;
+  dla pozostałych kształtów zmienia się rozmiar z zachowaniem proporcji.
+  Przycisk **Losuj nowy układ** tworzy inną kompozycję. Przy ograniczonym
+  miejscu lub dużym odstępie osiągnięty prześwit może różnić się od celu;
+  pasek statusu pokazuje wynik i informuje o niedopasowaniu.
 - **Tryb odległości — odstęp między krawędziami** oznacza minimalną
   szczelinę pomiędzy obrysami sąsiednich otworów. Program dobiera podziałkę
   na podstawie rzeczywistego kształtu i sprawdza, czy otwory nie zachodzą

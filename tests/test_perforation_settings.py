@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 import pytest
 from shapely.geometry import Polygon
@@ -41,6 +42,48 @@ def test_settings_round_trip_preserves_parameters(tmp_path):
     assert load_perforation_settings(path) == settings
 
 
+def test_random_settings_round_trip_preserves_generation_options(tmp_path):
+    path = tmp_path / "random.json"
+    settings = replace(
+        make_settings(),
+        layout_mode="random",
+        target_open_area_percentage=22.5,
+        randomize_opening_size=False,
+        random_min_size_mm=6.0,
+        random_max_size_mm=18.0,
+        random_min_gap_mm=1.5,
+        random_seed=12345,
+    )
+
+    save_perforation_settings(path, settings)
+
+    assert load_perforation_settings(path) == settings
+
+
+def test_settings_load_version_one_without_random_options(tmp_path):
+    path = tmp_path / "legacy.json"
+    settings = make_settings()
+    save_perforation_settings(path, settings)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["version"] = 1
+    for key in (
+        "layout_mode",
+        "target_open_area_percentage",
+        "randomize_opening_size",
+        "random_min_size_mm",
+        "random_max_size_mm",
+        "random_min_gap_mm",
+        "random_seed",
+    ):
+        data.pop(key)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = load_perforation_settings(path)
+
+    assert loaded == settings
+    assert loaded.layout_mode == "grid"
+
+
 def test_settings_round_trip_preserves_custom_opening_geometry(tmp_path):
     path = tmp_path / "custom.json"
     custom_shape = Polygon(
@@ -59,7 +102,7 @@ def test_settings_round_trip_preserves_custom_opening_geometry(tmp_path):
 
 def test_settings_reject_unsupported_version(tmp_path):
     path = tmp_path / "future.json"
-    path.write_text(json.dumps({"version": 2}), encoding="utf-8")
+    path.write_text(json.dumps({"version": 3}), encoding="utf-8")
 
     with pytest.raises(ValueError, match="Nieobsługiwana wersja"):
         load_perforation_settings(path)

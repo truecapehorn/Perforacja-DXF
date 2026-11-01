@@ -10,8 +10,10 @@ from shapely.errors import GEOSException
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 
-_VERSION = 1
+_VERSION = 2
+_SUPPORTED_VERSIONS = {1, 2}
 _PATTERNS = {"square", "staggered"}
+_LAYOUT_MODES = {"grid", "random"}
 _OPENING_TYPES = {
     "circle",
     "square",
@@ -42,6 +44,13 @@ class PerforationSettings:
     inner_margin_mm: float
     perforation_as_block: bool
     custom_opening: BaseGeometry | None = None
+    layout_mode: str = "grid"
+    target_open_area_percentage: float = 30.0
+    randomize_opening_size: bool = True
+    random_min_size_mm: float = 10.0
+    random_max_size_mm: float = 20.0
+    random_min_gap_mm: float = 2.0
+    random_seed: int = 0
 
     def __post_init__(self) -> None:
         numeric_ranges = {
@@ -54,6 +63,10 @@ class PerforationSettings:
             "opening_angle_degrees": (-180.0, 180.0),
             "outer_margin_mm": (0.0, 5000.0),
             "inner_margin_mm": (0.0, 5000.0),
+            "target_open_area_percentage": (0.1, 99.9),
+            "random_min_size_mm": (0.1, 5000.0),
+            "random_max_size_mm": (0.1, 5000.0),
+            "random_min_gap_mm": (0.0, 10_000.0),
         }
         for name, (minimum, maximum) in numeric_ranges.items():
             value = getattr(self, name)
@@ -66,6 +79,11 @@ class PerforationSettings:
                 raise ValueError(f"Nieprawidłowa wartość parametru {name}.")
         if not isinstance(self.pattern, str) or self.pattern not in _PATTERNS:
             raise ValueError("Nieznany rodzaj układu perforacji.")
+        if (
+            not isinstance(self.layout_mode, str)
+            or self.layout_mode not in _LAYOUT_MODES
+        ):
+            raise ValueError("Nieznany sposób rozmieszczania otworów.")
         if (
             not isinstance(self.opening_type, str)
             or self.opening_type not in _OPENING_TYPES
@@ -84,6 +102,16 @@ class PerforationSettings:
             raise ValueError("Liczba boków musi mieścić się w zakresie 3–20.")
         if not isinstance(self.perforation_as_block, bool):
             raise ValueError("Nieprawidłowy sposób eksportu perforacji.")
+        if not isinstance(self.randomize_opening_size, bool):
+            raise ValueError("Nieprawidłowe ustawienie losowania rozmiaru.")
+        if self.random_min_size_mm > self.random_max_size_mm:
+            raise ValueError("Zakres losowanego rozmiaru jest nieprawidłowy.")
+        if (
+            isinstance(self.random_seed, bool)
+            or not isinstance(self.random_seed, int)
+            or not 0 <= self.random_seed <= 2**32 - 1
+        ):
+            raise ValueError("Nieprawidłowe ziarno losowego układu.")
         if self.custom_opening is not None and (
             not isinstance(self.custom_opening, (Polygon, MultiPolygon))
             or self.custom_opening.is_empty
@@ -119,6 +147,13 @@ def save_perforation_settings(
         "inner_margin_mm": settings.inner_margin_mm,
         "perforation_as_block": settings.perforation_as_block,
         "custom_opening_wkb": custom_opening,
+        "layout_mode": settings.layout_mode,
+        "target_open_area_percentage": settings.target_open_area_percentage,
+        "randomize_opening_size": settings.randomize_opening_size,
+        "random_min_size_mm": settings.random_min_size_mm,
+        "random_max_size_mm": settings.random_max_size_mm,
+        "random_min_gap_mm": settings.random_min_gap_mm,
+        "random_seed": settings.random_seed,
     }
     Path(path).write_text(
         json.dumps(data, ensure_ascii=False, indent=2) + "\n",
@@ -132,7 +167,7 @@ def load_perforation_settings(
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, dict) or type(data.get("version")) is not int:
         raise ValueError("Nieprawidłowy plik konfiguracji perforacji.")
-    if data["version"] != _VERSION:
+    if data["version"] not in _SUPPORTED_VERSIONS:
         raise ValueError(
             f"Nieobsługiwana wersja konfiguracji: {data['version']}."
         )
@@ -161,6 +196,15 @@ def load_perforation_settings(
             inner_margin_mm=data["inner_margin_mm"],
             perforation_as_block=data["perforation_as_block"],
             custom_opening=custom_opening,
+            layout_mode=data.get("layout_mode", "grid"),
+            target_open_area_percentage=data.get(
+                "target_open_area_percentage", 30.0
+            ),
+            randomize_opening_size=data.get("randomize_opening_size", True),
+            random_min_size_mm=data.get("random_min_size_mm", 10.0),
+            random_max_size_mm=data.get("random_max_size_mm", 20.0),
+            random_min_gap_mm=data.get("random_min_gap_mm", 2.0),
+            random_seed=data.get("random_seed", 0),
         )
     except KeyError as error:
         raise ValueError(

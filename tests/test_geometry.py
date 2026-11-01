@@ -8,6 +8,7 @@ from shapely.geometry import MultiPolygon, Polygon
 from geometry import (
     export_dxf,
     generate_holes,
+    generate_random_holes,
     load_dxf,
     material_clearance,
     make_opening_shape,
@@ -122,6 +123,74 @@ def test_open_area_percentage_uses_net_material_area_and_hole_count():
     percentage = open_area_percentage(material, 2, opening)
 
     assert percentage == pytest.approx(2 * opening.area / 84 * 100)
+
+
+def test_random_holes_are_reproducible_sized_and_respect_clearance():
+    material = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+    opening = make_opening_shape("slot", 10, 4)
+
+    holes = generate_random_holes(
+        material,
+        opening,
+        target_open_area_percentage=10,
+        min_size_mm=6,
+        max_size_mm=10,
+        min_gap_mm=2,
+        margin_mm=5,
+        vary_length_only=True,
+        seed=123,
+    )
+    repeated = generate_random_holes(
+        material,
+        opening,
+        target_open_area_percentage=10,
+        min_size_mm=6,
+        max_size_mm=10,
+        min_gap_mm=2,
+        margin_mm=5,
+        vary_length_only=True,
+        seed=123,
+    )
+
+    assert holes == repeated
+    assert holes
+    assert all(
+        6 <= shape.bounds[2] - shape.bounds[0] <= 10
+        for _, _, shape in holes
+    )
+    assert all(
+        shape.bounds[3] - shape.bounds[1] == pytest.approx(4)
+        for _, _, shape in holes
+    )
+    placed = [translate(shape, xoff=x, yoff=y) for x, y, shape in holes]
+    assert all(material.buffer(-5).covers(shape) for shape in placed)
+    assert all(
+        first.distance(second) >= 2 - 1e-7
+        for index, first in enumerate(placed)
+        for second in placed[index + 1 :]
+    )
+    actual_percentage = (
+        sum(shape.area for _, _, shape in holes) / material.area * 100
+    )
+    largest_hole_percentage = max(
+        shape.area for _, _, shape in holes
+    ) / material.area * 100
+    assert abs(actual_percentage - 10) <= largest_hole_percentage
+
+
+def test_random_holes_reject_invalid_size_range():
+    plate = Polygon([(0, 0), (50, 0), (50, 50), (0, 50)])
+
+    with pytest.raises(ValueError, match="Zakres rozmiaru"):
+        generate_random_holes(
+            plate,
+            make_opening_shape("circle", 5),
+            10,
+            10,
+            5,
+            0,
+            0,
+        )
 
 
 @pytest.mark.parametrize(
@@ -299,6 +368,32 @@ def test_export_writes_rotated_rectangular_opening_as_closed_polyline(tmp_path):
     assert max(xs) == pytest.approx(12)
     assert min(ys) == pytest.approx(5)
     assert max(ys) == pytest.approx(15)
+
+
+def test_export_writes_per_hole_randomized_opening_sizes(tmp_path):
+    destination = tmp_path / "random_sizes.dxf"
+    material = Polygon([(0, 0), (50, 0), (50, 50), (0, 50)])
+    opening = make_opening_shape("circle", 4)
+    hole_openings = [
+        make_opening_shape("circle", 4),
+        make_opening_shape("circle", 8),
+    ]
+
+    export_dxf(
+        destination,
+        material,
+        [(10, 10), (30, 30)],
+        opening,
+        "circle",
+        hole_openings=hole_openings,
+    )
+
+    circles = [
+        entity
+        for entity in ezdxf.readfile(destination).modelspace()
+        if entity.dxftype() == "CIRCLE"
+    ]
+    assert [circle.dxf.radius for circle in circles] == pytest.approx([2, 4])
 
 
 def test_export_rotates_opening_independently_of_grid(tmp_path):

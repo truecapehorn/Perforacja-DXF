@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -17,6 +18,7 @@ from shapely.prepared import prep
 
 MAX_HOLES = 100_000
 MAX_GRID_CANDIDATES = 2_000_000
+MAX_RANDOM_CANDIDATES = 200_000
 
 _UNIT_TO_MM = {
     0: 1.0,  # Unitless: assumed to be millimeters.
@@ -304,6 +306,119 @@ def open_area_percentage(
     return hole_count * opening_shape.area / material.area * 100
 
 
+def generate_random_holes(
+    material: BaseGeometry,
+    opening_shape: BaseGeometry,
+    target_open_area_percentage: float,
+    min_size_mm: float,
+    max_size_mm: float,
+    min_gap_mm: float,
+    margin_mm: float,
+    inner_margin_mm: float | None = None,
+    angle_degrees: float = 0.0,
+    vary_length_only: bool = False,
+    seed: int = 0,
+) -> list[tuple[float, float, BaseGeometry]]:
+    if not 0 < target_open_area_percentage < 100:
+        raise ValueError("Docelowy stopień prześwitu musi być między 0 a 100%.")
+    if min_size_mm <= 0 or max_size_mm < min_size_mm:
+        raise ValueError("Zakres rozmiaru otworu jest nieprawidłowy.")
+    if min_gap_mm < 0:
+        raise ValueError("Minimalny odstęp nie może być ujemny.")
+    if not opening_shape.is_valid or opening_shape.area <= 0:
+        raise ValueError("Kształt otworu tworzy nieprawidłową geometrię.")
+
+    allowed = material_clearance(material, margin_mm, inner_margin_mm)
+    if allowed.is_empty:
+        return []
+
+    min_x, min_y, max_x, max_y = opening_shape.bounds
+    base_width = max_x - min_x
+    base_height = max_y - min_y
+    if base_width <= 0:
+        raise ValueError("Kształt otworu nie ma prawidłowej szerokości.")
+    if vary_length_only and min_size_mm < base_height:
+        raise ValueError(
+            "Minimalna długość fasolki nie może być mniejsza od jej szerokości."
+        )
+    scale_factors = (min_size_mm / base_width, max_size_mm / base_width)
+    max_radius = max(
+        math.hypot(x * scale_factors[1], y * scale_factors[1])
+        for x in (min_x, max_x)
+        for y in (min_y, max_y)
+    )
+    max_radius = max(max_radius, base_height / 2)
+    cell_size = max(2 * max_radius + min_gap_mm, 1e-9)
+    buckets: dict[tuple[int, int], list[tuple[float, float, BaseGeometry]]] = {}
+    placed: list[tuple[float, float, BaseGeometry]] = []
+    prepared = prep(allowed)
+    generator = random.Random(seed)
+    area_target = material.area * target_open_area_percentage / 100
+    area_current = 0.0
+    rejected_candidates = 0
+
+    for _ in range(MAX_RANDOM_CANDIDATES):
+        if area_current >= area_target or len(placed) >= MAX_HOLES:
+            break
+        rejection_limit = max(2_000, min(20_000, len(placed) * 20))
+        if rejected_candidates >= rejection_limit:
+            break
+        size = generator.uniform(min_size_mm, max_size_mm)
+        factor = size / base_width
+        hole_shape = scale(
+            opening_shape,
+            xfact=factor,
+            yfact=1.0 if vary_length_only else factor,
+            origin=(0, 0),
+        )
+        oriented_shape = rotate(hole_shape, angle_degrees, origin=(0, 0))
+        x = generator.uniform(allowed.bounds[0], allowed.bounds[2])
+        y = generator.uniform(allowed.bounds[1], allowed.bounds[3])
+        translated = translate(oriented_shape, xoff=x, yoff=y)
+        if not prepared.covers(translated):
+            rejected_candidates += 1
+            continue
+
+        bucket = (math.floor(x / cell_size), math.floor(y / cell_size))
+        collides = False
+        for bucket_x in range(bucket[0] - 1, bucket[0] + 2):
+            for bucket_y in range(bucket[1] - 1, bucket[1] + 2):
+                for other_x, other_y, other_shape in buckets.get(
+                    (bucket_x, bucket_y), []
+                ):
+                    if math.hypot(x - other_x, y - other_y) > cell_size:
+                        continue
+                    distance = translated.distance(other_shape)
+                    if distance + 1e-7 < min_gap_mm or (
+                        min_gap_mm == 0
+                        and translated.intersection(other_shape).area > 1e-9
+                    ):
+                        collides = True
+                        break
+                if collides:
+                    break
+            if collides:
+                break
+        if collides:
+            rejected_candidates += 1
+            continue
+
+        placed.append((x, y, hole_shape))
+        buckets.setdefault(bucket, []).append((x, y, translated))
+        area_current += hole_shape.area
+        rejected_candidates = 0
+
+    if area_current == 0:
+        return []
+
+    # Keep only the best-effort result at the requested open-area target.
+    while placed and area_current - area_target > area_target - (
+        area_current - placed[-1][2].area
+    ):
+        area_current -= placed.pop()[2].area
+    return placed
+
+
 def material_clearance(
     material: BaseGeometry,
     outer_margin_mm: float,
@@ -545,7 +660,12 @@ def export_dxf(
     angle_degrees: float = 0.0,
     opening_angle_degrees: float = 0.0,
     perforation_as_block: bool = False,
+    hole_openings: Iterable[BaseGeometry] | None = None,
 ) -> None:
+    hole_points = list(holes)
+    opening_shapes = list(hole_openings) if hole_openings is not None else None
+    if opening_shapes is not None and len(opening_shapes) != len(hole_points):
+        raise ValueError("Liczba kształtów otworów nie zgadza się z ich liczbą.")
     document = ezdxf.new("R2010")
     document.units = ezdxf.units.MM
     document.layers.new("OBRYS", dxfattribs={"color": 3})
@@ -571,16 +691,21 @@ def export_dxf(
         else None
     )
     target = block if block is not None else modelspace
-    for x, y in holes:
+    for index, (x, y) in enumerate(hole_points):
+        current_opening = (
+            opening_shapes[index]
+            if opening_shapes is not None
+            else opening_shape
+        )
         if opening_type == "circle":
-            radius = (opening_shape.bounds[2] - opening_shape.bounds[0]) / 2
+            radius = (current_opening.bounds[2] - current_opening.bounds[0]) / 2
             target.add_circle(
                 (x, y), radius, dxfattribs={"layer": "OTWORY"}
             )
             continue
         placed_opening = translate(
             rotate(
-                opening_shape,
+                current_opening,
                 angle_degrees + opening_angle_degrees,
                 origin=(0, 0),
             ),
