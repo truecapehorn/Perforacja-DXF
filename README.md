@@ -78,6 +78,11 @@ zależności i buduje jednoplikową aplikację. Wynik znajduje się w folderze
 budowaniu wymagane jest połączenie z internetem.
 
 Skrypt buduje wersję dla Windows; nie tworzy pliku wykonywalnego dla Linux.
+Po udanym buildzie kopiuje EXE, jeśli lokalizacje są dostępne, do:
+`G:\Mój dysk\!!Projekty\Perforacja-DXF\<nazwa EXE>\<nazwa EXE>.exe`
+oraz `Z:\BACKUPS\INSTALKI\<nazwa EXE>\<nazwa EXE>.exe`. Gdy dysk lub katalog
+docelowy jest niedostępny albo kopiowanie się nie powiedzie, skrypt wyświetla
+informację **NIE SKOPIOWANO** dla tej lokalizacji; sam plik pozostaje w `dist`.
 
 ## Szybki przebieg pracy
 
@@ -93,9 +98,13 @@ Skrypt buduje wersję dla Windows; nie tworzy pliku wykonywalnego dla Linux.
    jest nieprawidłowa, komunikat błędu pojawi się na dole, a eksport zostanie
    wyłączony.
 5. Wybierz sposób eksportu perforacji i nazwę pliku, a następnie kliknij
-   **Eksportuj DXF**. Program nie pozwala nadpisać aktualnie otwartego pliku
-   źródłowego; przed nadpisaniem innego istniejącego pliku prosi o
+   **Eksportuj DXF**. Obok DXF zostanie zapisany plik konfiguracji JSON o tej
+   samej nazwie. Program nie pozwala nadpisać aktualnie otwartego pliku
+   źródłowego; przed nadpisaniem istniejącego DXF lub konfiguracji prosi o
    potwierdzenie.
+6. Aby użyć zapisanych parametrów ponownie, najpierw otwórz rysunek DXF, a
+   następnie kliknij **Wczytaj ustawienia** i wybierz odpowiadający mu plik
+   JSON. Konfiguracja zawiera również geometrię własnego kształtu otworu.
 
 ## Parametry detalu
 
@@ -218,6 +227,6 @@ zmienia sposób organizacji otworów w DXF, nie ich geometrię.
 
 ## Poprawki
 
-- [ ] Eksportowanie obok dxf również pliku z konfiguracją danej perforacji. Stworzyć mozliwosc ładowania tych ustawien z tego pliku.
-- [ ] Dla pliku build_exe.bat czy jest mozliwosc skopiowania utworzonego pliku exe do katalogu google G:\Mój dysk\!!Projekty\Perforacja-DXF\"katalog  nazwa pliku\nawa pliku.exe" i Z:\BACKUPS\INSTALKI\"katalog  nazwa pliku\nawa pliku.exe". Do katalogu z nazwa pliku?. Oczywiscie jak dany komputer ma dostep. Jak nie to zeby była informacja ze nie skopiowało go.
-- [ ] 
+ - [x] Eksportowanie obok dxf również pliku z konfiguracją danej perforacji. Stworzyć mozliwosc ładowania tych ustawien z tego pliku.
+  
+ - [x] Dla pliku build_exe.bat czy jest mozliwosc skopiowania utworzonego pliku exe do katalogu google G:\Mój dysk!!Projekty\Perforacja-DXF"katalog nazwa pliku\nawa pliku.exe" i Z:\BACKUPS\INSTALKI"katalog nazwa pliku\nawa pliku.exe". Do katalogu z nazwa pliku?. Oczywiscie jak dany komputer ma dostep. Jak nie to zeby była informacja ze nie skopiowało go.

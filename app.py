@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -28,6 +29,11 @@ from PyQt5.QtWidgets import (
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 
+from perforation_settings import (
+    PerforationSettings,
+    load_perforation_settings,
+    save_perforation_settings,
+)
 from geometry import (
     Drawing,
     export_dxf,
@@ -271,6 +277,9 @@ class MainWindow(QMainWindow):
         open_button = QPushButton("Otwórz DXF")
         open_button.clicked.connect(self._choose_input)
         header.addWidget(open_button)
+        settings_button = QPushButton("Wczytaj ustawienia")
+        settings_button.clicked.connect(self._choose_settings)
+        header.addWidget(settings_button)
         self.export_button = QPushButton("Eksportuj DXF")
         self.export_button.clicked.connect(self._export)
         self.export_button.setEnabled(False)
@@ -481,6 +490,93 @@ class MainWindow(QMainWindow):
         if filename:
             self._load_file(Path(filename))
 
+    def _choose_settings(self) -> None:
+        if self.drawing is None:
+            QMessageBox.warning(
+                self,
+                "Najpierw wczytaj DXF",
+                "Przed wczytaniem ustawień otwórz rysunek DXF.",
+            )
+            return
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Wczytaj ustawienia perforacji",
+            "",
+            "Pliki konfiguracji (*.json)",
+        )
+        if not filename:
+            return
+        try:
+            settings = load_perforation_settings(filename)
+            self._apply_settings(settings)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
+            QMessageBox.critical(
+                self, "Nie można wczytać ustawień", str(error)
+            )
+            return
+        QMessageBox.information(
+            self,
+            "Wczytano ustawienia",
+            f"Wczytano ustawienia z:\n{filename}",
+        )
+
+    def _apply_settings(self, settings: PerforationSettings) -> None:
+        fields = (
+            self.width_input,
+            self.height_input,
+            self.pattern_input,
+            self.opening_type_input,
+            self.opening_width_input,
+            self.opening_height_input,
+            self.polygon_sides_input,
+            self.spacing_input,
+            self.spacing_mode,
+            self.angle_input,
+            self.opening_angle_input,
+            self.margin_input,
+            self.inner_margin_input,
+            self.perforation_export_input,
+        )
+        previous_signal_states = [
+            (field, field.blockSignals(True)) for field in fields
+        ]
+        try:
+            self.width_input.setValue(settings.width_mm)
+            self.height_input.setValue(settings.height_mm)
+            self.pattern_input.setCurrentIndex(
+                self.pattern_input.findData(settings.pattern)
+            )
+            self.opening_type_input.setCurrentIndex(
+                self.opening_type_input.findData(settings.opening_type)
+            )
+            self.opening_width_input.setValue(settings.opening_width_mm)
+            self.opening_height_input.setValue(settings.opening_height_mm)
+            self.polygon_sides_input.setValue(settings.polygon_sides)
+            self.spacing_input.setValue(settings.spacing_mm)
+            self.spacing_mode.setCurrentIndex(
+                self.spacing_mode.findData(settings.spacing_mode)
+            )
+            self.angle_input.setValue(settings.grid_angle_degrees)
+            self.opening_angle_input.setValue(settings.opening_angle_degrees)
+            self.margin_input.setValue(settings.outer_margin_mm)
+            self.inner_margin_input.setValue(settings.inner_margin_mm)
+            self.perforation_export_input.setCurrentIndex(
+                self.perforation_export_input.findData(
+                    settings.perforation_as_block
+                )
+            )
+            self.custom_opening = settings.custom_opening
+            self.custom_opening_warnings = ()
+            self.custom_opening_name.setText(
+                "Kształt zapisany w konfiguracji."
+                if settings.custom_opening is not None
+                else "Nie wczytano pliku."
+            )
+        finally:
+            for field, previous_state in previous_signal_states:
+                field.blockSignals(previous_state)
+        self._opening_type_changed()
+
     def _choose_output(self) -> None:
         filename, _ = QFileDialog.getSaveFileName(
             self,
@@ -664,15 +760,23 @@ class MainWindow(QMainWindow):
                 "Wybierz inną nazwę pliku niż oryginalny rysunek DXF.",
             )
             return
-        if destination.exists() and QMessageBox.question(
+        settings_destination = destination.with_suffix(".json")
+        existing_outputs = [
+            str(path)
+            for path in (destination, settings_destination)
+            if path.exists()
+        ]
+        if existing_outputs and QMessageBox.question(
             self,
             "Potwierdź nadpisanie",
-            f"Plik już istnieje:\n{destination}\n\nCzy go nadpisać?",
+            "Następujące pliki już istnieją:\n"
+            f"{chr(10).join(existing_outputs)}\n\nCzy je nadpisać?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         ) != QMessageBox.Yes:
             return
         try:
+            settings = self._current_settings()
             export_dxf(
                 destination,
                 self.preview_material,
@@ -686,12 +790,45 @@ class MainWindow(QMainWindow):
         except (OSError, ezdxf.DXFError, ValueError) as error:
             QMessageBox.critical(self, "Nie można zapisać DXF", str(error))
             return
+        try:
+            save_perforation_settings(settings_destination, settings)
+        except (OSError, ValueError) as error:
+            QMessageBox.critical(
+                self,
+                "Nie zapisano konfiguracji",
+                f"DXF został zapisany, ale konfiguracji nie udało się "
+                f"zapisać:\n{error}",
+            )
+            return
         QMessageBox.information(
             self,
             "Zapisano plik",
-            f"Zapisano {len(self.preview_holes):,} otworów do:\n{destination}",
+            f"Zapisano {len(self.preview_holes):,} otworów do:\n"
+            f"{destination}\n\n"
+            f"Ustawienia perforacji zapisano do:\n{settings_destination}",
         )
 
+    def _current_settings(self) -> PerforationSettings:
+        opening_type = self.opening_type_input.currentData()
+        return PerforationSettings(
+            width_mm=self.width_input.value(),
+            height_mm=self.height_input.value(),
+            pattern=self.pattern_input.currentData(),
+            opening_type=opening_type,
+            opening_width_mm=self.opening_width_input.value(),
+            opening_height_mm=self.opening_height_input.value(),
+            polygon_sides=self.polygon_sides_input.value(),
+            spacing_mm=self.spacing_input.value(),
+            spacing_mode=self.spacing_mode.currentData(),
+            grid_angle_degrees=self.angle_input.value(),
+            opening_angle_degrees=self.opening_angle_input.value(),
+            outer_margin_mm=self.margin_input.value(),
+            inner_margin_mm=self.inner_margin_input.value(),
+            perforation_as_block=self.perforation_export_input.currentData(),
+            custom_opening=(
+                self.custom_opening if opening_type == "custom" else None
+            ),
+        )
 
 def main() -> int:
     application = QApplication(sys.argv)

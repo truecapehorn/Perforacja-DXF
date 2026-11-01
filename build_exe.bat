@@ -1,5 +1,6 @@
 @echo off
 setlocal
+chcp 65001 >nul
 cd /d "%~dp0"
 
 set "APP_NAME="
@@ -20,4 +21,30 @@ if errorlevel 1 exit /b 1
 if errorlevel 1 exit /b 1
 
 echo.
-echo Gotowy plik: dist\%APP_NAME%.exe
+set "BUILT_EXE=dist\%APP_NAME%.exe"
+echo Gotowy plik: %BUILT_EXE%
+echo.
+
+call :copy_to "G:\Mój dysk\!!Projekty\Perforacja-DXF"
+call :copy_to "Z:\BACKUPS\INSTALKI"
+exit /b 0
+
+:copy_to
+set "TARGET_ROOT=%~1"
+set "TARGET_DIR=%TARGET_ROOT%\%APP_NAME%"
+if not exist "%TARGET_ROOT%\" (
+  echo NIE SKOPIOWANO do "%TARGET_DIR%\%APP_NAME%.exe" - katalog docelowy jest niedostepny.
+  exit /b 0
+)
+if not exist "%TARGET_DIR%\" mkdir "%TARGET_DIR%" 2>nul
+if not exist "%TARGET_DIR%\" (
+  echo NIE SKOPIOWANO do "%TARGET_DIR%\%APP_NAME%.exe" - nie mozna utworzyc katalogu.
+  exit /b 0
+)
+copy /Y "%BUILT_EXE%" "%TARGET_DIR%\%APP_NAME%.exe" >nul
+if errorlevel 1 (
+  echo NIE SKOPIOWANO do "%TARGET_DIR%\%APP_NAME%.exe" - blad kopiowania.
+) else (
+  echo Skopiowano do: "%TARGET_DIR%\%APP_NAME%.exe"
+)
+exit /b 0
