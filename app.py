@@ -33,6 +33,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QPushButton,
     QProgressDialog,
+    QScrollArea,
     QSplitter,
     QSpinBox,
     QVBoxLayout,
@@ -415,6 +416,14 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
     def _build_controls(self) -> QWidget:
+        scroll_area = QScrollArea()
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setMinimumWidth(324)
+        scroll_area.setMaximumWidth(390)
+
         panel = QFrame()
         panel.setObjectName("controls")
         panel.setMinimumWidth(310)
@@ -653,7 +662,8 @@ class MainWindow(QMainWindow):
         )
         self._update_opening_controls()
         self._update_random_controls()
-        return panel
+        scroll_area.setWidget(panel)
+        return scroll_area
 
     def _choose_input(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -861,6 +871,7 @@ class MainWindow(QMainWindow):
             opening_bounds = opening_shape.bounds
             fixed_width = opening_bounds[2] - opening_bounds[0]
             fixed_height = opening_bounds[3] - opening_bounds[1]
+            opening_type = self.opening_type_input.currentData()
             min_width = (
                 self.random_min_width_input.value()
                 if self.randomize_width_input.isChecked()
@@ -881,9 +892,9 @@ class MainWindow(QMainWindow):
                 if self.randomize_height_input.isChecked()
                 else fixed_height
             )
-            if self.opening_type_input.currentData() == "circle":
-                min_height = min_width
-                max_height = max_width
+            if opening_type not in {"rectangle", "ellipse", "slot"}:
+                min_height = fixed_height * min_width / fixed_width
+                max_height = fixed_height * max_width / fixed_width
             min_horizontal_gap = (
                 self.random_min_horizontal_gap_input.value()
                 if self.randomize_horizontal_gap_input.isChecked()
@@ -907,6 +918,8 @@ class MainWindow(QMainWindow):
             margin = self.margin_input.value()
             inner_margin = self.inner_margin_input.value()
             angle = self.angle_input.value()
+            polygon_sides = self.polygon_sides_input.value()
+            custom_opening = self.custom_opening
             self.random_seed = secrets.randbits(32)
             seed = self.random_seed
         except ValueError as error:
@@ -935,6 +948,13 @@ class MainWindow(QMainWindow):
                 seed=seed,
                 progress_callback=progress,
                 cancellation_requested=cancellation_requested,
+                opening_shape_factory=lambda width, height: make_opening_shape(
+                    opening_type,
+                    width,
+                    height,
+                    polygon_sides,
+                    custom_opening,
+                ),
             )
 
         self._random_cancellation = Event()
@@ -1028,8 +1048,16 @@ class MainWindow(QMainWindow):
 
     def _update_random_controls(self) -> None:
         is_random = self.layout_mode_input.currentData() == "random"
+        height_randomizable = (
+            self.opening_type_input.currentData()
+            in {"rectangle", "ellipse", "slot"}
+        )
         random_width = is_random and self.randomize_width_input.isChecked()
-        random_height = is_random and self.randomize_height_input.isChecked()
+        random_height = (
+            is_random
+            and height_randomizable
+            and self.randomize_height_input.isChecked()
+        )
         random_horizontal_gap = (
             is_random and self.randomize_horizontal_gap_input.isChecked()
         )
@@ -1039,8 +1067,6 @@ class MainWindow(QMainWindow):
         for widget in (
             self.randomize_width_input,
             self.random_width_range_label,
-            self.randomize_height_input,
-            self.random_height_range_label,
             self.randomize_horizontal_gap_input,
             self.randomize_vertical_gap_input,
             self.regenerate_random_button,
@@ -1081,14 +1107,24 @@ class MainWindow(QMainWindow):
 
     def _update_opening_controls(self) -> None:
         opening_type = self.opening_type_input.currentData()
-        circular_opening = opening_type == "circle"
-        if circular_opening and self.randomize_height_input.isChecked():
+        height_randomizable = opening_type in {"rectangle", "ellipse", "slot"}
+        if not height_randomizable and self.randomize_height_input.isChecked():
             previous_state = self.randomize_height_input.blockSignals(True)
             self.randomize_height_input.setChecked(False)
             self.randomize_height_input.blockSignals(previous_state)
-        self.randomize_height_input.setEnabled(not circular_opening)
-        self.random_height_range_label.setEnabled(not circular_opening)
-        self.random_height_range.setEnabled(not circular_opening)
+        is_random = self.layout_mode_input.currentData() == "random"
+        self.randomize_height_input.setVisible(is_random and height_randomizable)
+        self.random_height_range_label.setVisible(
+            is_random and height_randomizable
+        )
+        self.random_height_range.setVisible(
+            is_random
+            and height_randomizable
+            and self.randomize_height_input.isChecked()
+        )
+        self.randomize_height_input.setEnabled(height_randomizable)
+        self.random_height_range_label.setEnabled(height_randomizable)
+        self.random_height_range.setEnabled(height_randomizable)
         self.opening_width_label.setText(
             {
                 "circle": "Średnica otworu:",

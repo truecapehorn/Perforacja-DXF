@@ -323,6 +323,7 @@ def generate_random_holes(
     seed: int = 0,
     progress_callback: Callable[[int], None] | None = None,
     cancellation_requested: Callable[[], bool] | None = None,
+    opening_shape_factory: Callable[[float, float], BaseGeometry] | None = None,
 ) -> list[tuple[float, float, BaseGeometry]]:
     if (
         min_width_mm <= 0
@@ -363,16 +364,17 @@ def generate_random_holes(
     attempts = 0
     expected_height = (min_height_mm + max_height_mm) / 2
     expected_width = (min_width_mm + max_width_mm) / 2
-    nominal_shape = rotate(
-        scale(
+    nominal_shape = (
+        opening_shape_factory(expected_width, expected_height)
+        if opening_shape_factory is not None
+        else scale(
             opening_shape,
             xfact=expected_width / base_width,
             yfact=expected_height / base_height,
             origin=(0, 0),
-        ),
-        angle_degrees,
-        origin=(0, 0),
+        )
     )
+    nominal_shape = rotate(nominal_shape, angle_degrees, origin=(0, 0))
     nominal_row_height = nominal_shape.bounds[3] - nominal_shape.bounds[1]
     while (
         row_bottom < allowed_max_y
@@ -415,11 +417,15 @@ def generate_random_holes(
                 horizontal_gap = generator.uniform(
                     min_horizontal_gap_mm, max_horizontal_gap_mm
                 )
-                hole_shape = scale(
-                    opening_shape,
-                    xfact=width_mm / base_width,
-                    yfact=height_mm / base_height,
-                    origin=(0, 0),
+                hole_shape = (
+                    opening_shape_factory(width_mm, height_mm)
+                    if opening_shape_factory is not None
+                    else scale(
+                        opening_shape,
+                        xfact=width_mm / base_width,
+                        yfact=height_mm / base_height,
+                        origin=(0, 0),
+                    )
                 )
                 oriented_shape = rotate(
                     hole_shape, angle_degrees, origin=(0, 0)

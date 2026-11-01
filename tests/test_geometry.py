@@ -235,6 +235,35 @@ def test_random_holes_can_vary_rectangle_width_height_and_spacing():
     )
 
 
+def test_random_slot_is_rebuilt_as_a_capsule_instead_of_stretched_oval():
+    material = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+    opening = make_opening_shape("slot", 10, 10)
+
+    holes = generate_random_holes(
+        material,
+        opening,
+        min_width_mm=40,
+        max_width_mm=40,
+        min_height_mm=10,
+        max_height_mm=10,
+        min_horizontal_gap_mm=2,
+        max_horizontal_gap_mm=2,
+        min_vertical_gap_mm=2,
+        max_vertical_gap_mm=2,
+        margin_mm=2,
+        seed=456,
+        opening_shape_factory=lambda width, height: make_opening_shape(
+            "slot", width, height
+        ),
+    )
+
+    assert holes
+    for _, _, shape in holes:
+        assert shape.bounds[2] - shape.bounds[0] == pytest.approx(40)
+        assert shape.bounds[3] - shape.bounds[1] == pytest.approx(10)
+        assert shape.area == pytest.approx(30 * 10 + math.pi * 5**2, rel=1e-3)
+
+
 def test_fixed_random_spacing_uses_even_rows_and_constant_horizontal_gap():
     material = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
     opening = make_opening_shape("rectangle", 10, 8)
