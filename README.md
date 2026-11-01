@@ -145,7 +145,9 @@ Wymiary kształtów i odstępy podaje się w milimetrach.
   detalu, także w oddzielnych fragmentach konturu. Można niezależnie włączyć
   losowanie szerokości, wysokości oraz odstępu poziomego i pionowego, podając
   zakres min–max każdego losowanego parametru. Wymiary i odstępy są losowane
-  niezależnie i nie są dopasowywane do docelowego prześwitu. Niezaznaczone
+  niezależnie i nie są dopasowywane do docelowego prześwitu. Przy losowym
+  odstępie pionowym każdy otwór jest przesuwany w pionie niezależnie, dzięki
+  czemu nie tworzą się równe rzędy. Niezaznaczone
   wymiary wynikają z ustawionego kształtu, a niezaznaczony odstęp korzysta
   z parametru odstępu z trybu siatki. Układ jest przeliczany wyłącznie po
   kliknięciu **Losuj losowy układ**. Podczas obliczeń działa okno postępu

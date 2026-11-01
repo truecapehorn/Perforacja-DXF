@@ -401,7 +401,7 @@ def test_random_horizontal_gap_keeps_vertical_spacing_fixed():
     assert all(1 <= gap <= 5 for gap in horizontal_gaps)
 
 
-def test_random_vertical_gap_keeps_horizontal_spacing_fixed():
+def test_random_vertical_gap_varies_independently_for_each_hole():
     material = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
     opening = make_opening_shape("rectangle", 10, 8)
 
@@ -421,23 +421,23 @@ def test_random_vertical_gap_keeps_horizontal_spacing_fixed():
     )
 
     placed = [translate(shape, xoff=x, yoff=y) for x, y, shape in holes]
-    rows: dict[float, list[Polygon]] = {}
+    columns: dict[float, list[Polygon]] = {}
     for shape in placed:
-        rows.setdefault(round(shape.centroid.y, 6), []).append(shape)
-    row_centers = sorted(rows)
-    assert len(row_centers) > 2
-    vertical_gaps = [
-        second - first - 8
-        for first, second in zip(row_centers, row_centers[1:])
-    ]
-    assert len(set(round(gap, 6) for gap in vertical_gaps)) > 1
-    assert all(1 <= gap <= 5 for gap in vertical_gaps)
-    for row in rows.values():
-        row.sort(key=lambda shape: shape.bounds[0])
-        assert all(
-            first.distance(second) == pytest.approx(3)
-            for first, second in zip(row, row[1:])
+        columns.setdefault(round(shape.centroid.x, 6), []).append(shape)
+    vertical_gaps = []
+    for column in columns.values():
+        column.sort(key=lambda shape: shape.centroid.y)
+        vertical_gaps.extend(
+            second.bounds[1] - first.bounds[3]
+            for first, second in zip(column, column[1:])
         )
+
+    assert len(vertical_gaps) > 10
+    assert len(set(round(gap, 6) for gap in vertical_gaps)) > 1
+    assert all(gap >= 1 - 1e-7 for gap in vertical_gaps)
+    in_range_gaps = [gap for gap in vertical_gaps if 1 - 1e-7 <= gap <= 5 + 1e-7]
+    assert len(set(round(gap, 6) for gap in in_range_gaps)) > 1
+    assert len({round(shape.centroid.y, 6) for shape in placed}) > len(columns)
 
 
 def test_random_holes_cover_full_height_of_u_shaped_material():

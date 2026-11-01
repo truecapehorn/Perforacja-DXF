@@ -362,8 +362,13 @@ def generate_random_holes(
         progress_callback(0)
 
     allowed_min_x, allowed_min_y, allowed_max_x, allowed_max_y = allowed.bounds
-    row_bottom = allowed_min_y
     attempts = 0
+    vertical_gap_range = max_vertical_gap_mm - min_vertical_gap_mm
+    vertical_jitter = vertical_gap_range / 4
+    average_vertical_gap = (
+        min_vertical_gap_mm + max_vertical_gap_mm
+    ) / 2
+    row_bottom = allowed_min_y + vertical_jitter
     expected_height = (min_height_mm + max_height_mm) / 2
     expected_width = (min_width_mm + max_width_mm) / 2
     nominal_shape = (
@@ -441,6 +446,11 @@ def generate_random_holes(
                     ),
                 )
                 height_mm = generator.uniform(min_height_mm, max_height_mm)
+                vertical_offset = (
+                    generator.uniform(-vertical_jitter, vertical_jitter)
+                    if vertical_jitter
+                    else 0.0
+                )
                 horizontal_gap = generator.uniform(
                     min_horizontal_gap_mm, max_horizontal_gap_mm
                 )
@@ -498,7 +508,7 @@ def generate_random_holes(
                         ),
                     )
                 x = cursor_x - shape_bounds[0]
-                y = row_bottom - shape_bounds[1]
+                y = row_bottom + vertical_offset - shape_bounds[1]
                 translated = translate(oriented_shape, xoff=x, yoff=y)
                 if prepared.covers(translated):
                     placed.append((x, y, hole_shape))
@@ -514,7 +524,9 @@ def generate_random_holes(
                     )
                     minimum_shape_bounds = minimum_oriented_shape.bounds
                     minimum_x = cursor_x - minimum_shape_bounds[0]
-                    minimum_y = row_bottom - minimum_shape_bounds[1]
+                    minimum_y = (
+                        row_bottom + vertical_offset - minimum_shape_bounds[1]
+                    )
                     minimum_translated = translate(
                         minimum_oriented_shape,
                         xoff=minimum_x,
@@ -540,7 +552,11 @@ def generate_random_holes(
                             )
                             candidate_bounds = candidate_oriented_shape.bounds
                             candidate_x = cursor_x - candidate_bounds[0]
-                            candidate_y = row_bottom - candidate_bounds[1]
+                            candidate_y = (
+                                row_bottom
+                                + vertical_offset
+                                - candidate_bounds[1]
+                            )
                             candidate_translated = translate(
                                 candidate_oriented_shape,
                                 xoff=candidate_x,
@@ -580,8 +596,10 @@ def generate_random_holes(
             row_height = nominal_row_height
         if row_height <= 0:
             break
-        vertical_gap = generator.uniform(
-            min_vertical_gap_mm, max_vertical_gap_mm
+        vertical_gap = (
+            generator.uniform(min_vertical_gap_mm, max_vertical_gap_mm)
+            if vertical_gap_range == 0
+            else average_vertical_gap
         )
         row_bottom += row_height + vertical_gap
         if progress_callback is not None:
