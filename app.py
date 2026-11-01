@@ -4,9 +4,19 @@ import json
 import secrets
 import sys
 from pathlib import Path
+from threading import Event
+from typing import Callable
 
 import ezdxf
-from PyQt5.QtCore import QPoint, QPointF, Qt, pyqtSignal
+from PyQt5.QtCore import (
+    QObject,
+    QPoint,
+    QPointF,
+    QThread,
+    Qt,
+    pyqtSignal,
+    pyqtSlot,
+)
 from PyQt5.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt5.QtWidgets import (
     QApplication,
@@ -22,11 +32,13 @@ from PyQt5.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QProgressDialog,
     QSplitter,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
+from shapely.errors import GEOSException
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 
@@ -46,6 +58,38 @@ from geometry import (
     open_area_percentage,
     resize_material,
 )
+
+
+class RandomPerforationWorker(QObject):
+    progress = pyqtSignal(int)
+    completed = pyqtSignal(object)
+    failed = pyqtSignal(str)
+    cancelled = pyqtSignal()
+
+    def __init__(
+        self,
+        calculate: Callable[
+            [Callable[[int], None], Callable[[], bool]],
+            list[tuple[float, float, BaseGeometry]],
+        ],
+        cancellation: Event,
+    ) -> None:
+        super().__init__()
+        self.calculate = calculate
+        self.cancellation = cancellation
+
+    @pyqtSlot()
+    def run(self) -> None:
+        try:
+            result = self.calculate(
+                self.progress.emit, self.cancellation.is_set
+            )
+        except InterruptedError:
+            self.cancelled.emit()
+        except (ValueError, GEOSException) as error:
+            self.failed.emit(str(error))
+        else:
+            self.completed.emit(result)
 
 
 class Preview(QWidget):
@@ -258,6 +302,13 @@ class MainWindow(QMainWindow):
         self.custom_opening: BaseGeometry | None = None
         self.custom_opening_warnings: tuple[str, ...] = ()
         self.random_seed = secrets.randbits(32)
+        self._random_result_current = False
+        self._random_thread: QThread | None = None
+        self._random_worker: RandomPerforationWorker | None = None
+        self._random_cancellation: Event | None = None
+        self._random_progress: QProgressDialog | None = None
+        self._random_pending_material: BaseGeometry | None = None
+        self._random_pending_opening: BaseGeometry | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -463,20 +514,79 @@ class MainWindow(QMainWindow):
         self.target_open_area_input.setSuffix(" %")
         self.random_target_label = QLabel("Docelowy prześwit:")
         form.addRow(self.random_target_label, self.target_open_area_input)
-        self.randomize_size_input = QCheckBox("Losuj rozmiary otworów")
-        self.randomize_size_input.setChecked(True)
-        self.randomize_size_label = QLabel("Rozmiary:")
-        form.addRow(self.randomize_size_label, self.randomize_size_input)
-        self.random_min_size_input = _parameter_input(10.0, 0.1, 5000.0)
-        self.random_min_size_label = QLabel("Minimalna długość / rozmiar:")
-        form.addRow(self.random_min_size_label, self.random_min_size_input)
-        self.random_max_size_input = _parameter_input(20.0, 0.1, 5000.0)
-        self.random_max_size_label = QLabel("Maksymalna długość / rozmiar:")
-        form.addRow(self.random_max_size_label, self.random_max_size_input)
-        self.random_min_gap_input = _parameter_input(2.0, 0.0, 10_000.0)
-        self.random_min_gap_label = QLabel("Minimalny odstęp otworów:")
-        form.addRow(self.random_min_gap_label, self.random_min_gap_input)
-        self.regenerate_random_button = QPushButton("Losuj nowy układ")
+        def dimension_range_row(
+            minimum: float,
+            maximum: float,
+            lower_bound: float = 0.1,
+            upper_bound: float = 5000.0,
+        ) -> tuple[QWidget, QDoubleSpinBox, QDoubleSpinBox]:
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.addWidget(QLabel("min"))
+            minimum_input = _parameter_input(
+                minimum, lower_bound, upper_bound
+            )
+            minimum_input.setMinimumWidth(115)
+            row_layout.addWidget(minimum_input)
+            row_layout.addWidget(QLabel("max"))
+            maximum_input = _parameter_input(
+                maximum, lower_bound, upper_bound
+            )
+            maximum_input.setMinimumWidth(115)
+            row_layout.addWidget(maximum_input)
+            return row, minimum_input, maximum_input
+
+        self.randomize_width_input = QCheckBox("Losuj szerokość")
+        self.randomize_width_input.setChecked(True)
+        form.addRow(self.randomize_width_input)
+        (
+            self.random_width_range,
+            self.random_min_width_input,
+            self.random_max_width_input,
+        ) = dimension_range_row(10.0, 20.0)
+        self.random_width_range_label = QLabel("Zakres szerokości:")
+        form.addRow(self.random_width_range_label)
+        form.addRow(self.random_width_range)
+        self.randomize_height_input = QCheckBox("Losuj wysokość")
+        form.addRow(self.randomize_height_input)
+        (
+            self.random_height_range,
+            self.random_min_height_input,
+            self.random_max_height_input,
+        ) = dimension_range_row(10.0, 20.0)
+        self.random_height_range_label = QLabel("Zakres wysokości:")
+        form.addRow(self.random_height_range_label)
+        form.addRow(self.random_height_range)
+        self.randomize_horizontal_gap_input = QCheckBox(
+            "Losuj odstęp poziomy"
+        )
+        form.addRow(self.randomize_horizontal_gap_input)
+        (
+            self.random_horizontal_gap_range,
+            self.random_min_horizontal_gap_input,
+            self.random_max_horizontal_gap_input,
+        ) = dimension_range_row(2.0, 8.0, 0.0, 10_000.0)
+        self.random_horizontal_gap_range_label = QLabel(
+            "Zakres odstępu poziomego:"
+        )
+        form.addRow(self.random_horizontal_gap_range_label)
+        form.addRow(self.random_horizontal_gap_range)
+        self.randomize_vertical_gap_input = QCheckBox(
+            "Losuj odstęp pionowy"
+        )
+        form.addRow(self.randomize_vertical_gap_input)
+        (
+            self.random_vertical_gap_range,
+            self.random_min_vertical_gap_input,
+            self.random_max_vertical_gap_input,
+        ) = dimension_range_row(2.0, 8.0, 0.0, 10_000.0)
+        self.random_vertical_gap_range_label = QLabel(
+            "Zakres odstępu pionowego:"
+        )
+        form.addRow(self.random_vertical_gap_range_label)
+        form.addRow(self.random_vertical_gap_range)
+        self.regenerate_random_button = QPushButton("Losuj losowy układ")
         form.addRow(self.regenerate_random_button)
         layout.addLayout(form)
 
@@ -500,10 +610,12 @@ class MainWindow(QMainWindow):
         layout.addLayout(output_row)
         layout.addStretch()
 
+        self.opening_type_input.currentIndexChanged.connect(
+            self._opening_type_changed
+        )
         for field in (
             self.width_input,
             self.height_input,
-            self.layout_mode_input,
             self.pattern_input,
             self.opening_width_input,
             self.opening_height_input,
@@ -514,24 +626,38 @@ class MainWindow(QMainWindow):
             self.margin_input,
             self.inner_margin_input,
             self.target_open_area_input,
-            self.random_min_size_input,
-            self.random_max_size_input,
-            self.random_min_gap_input,
+            self.random_min_width_input,
+            self.random_max_width_input,
+            self.random_min_height_input,
+            self.random_max_height_input,
+            self.random_min_horizontal_gap_input,
+            self.random_max_horizontal_gap_input,
+            self.random_min_vertical_gap_input,
+            self.random_max_vertical_gap_input,
+            self.polygon_sides_input,
+            self.randomize_width_input,
+            self.randomize_height_input,
+            self.randomize_horizontal_gap_input,
+            self.randomize_vertical_gap_input,
         ):
-            field.valueChanged.connect(self._refresh) if isinstance(
-                field, QDoubleSpinBox
-            ) else field.currentIndexChanged.connect(self._refresh)
+            signal = (
+                field.valueChanged
+                if isinstance(field, (QDoubleSpinBox, QSpinBox))
+                else (
+                    field.currentIndexChanged
+                    if isinstance(field, QComboBox)
+                    else field.toggled
+                )
+            )
+            signal.connect(self._parameters_changed)
         self.layout_mode_input.currentIndexChanged.connect(
-            self._update_random_controls
+            self._layout_mode_changed
         )
-        self.opening_type_input.currentIndexChanged.connect(
-            self._opening_type_changed
+        self.regenerate_random_button.clicked.connect(
+            self._generate_random_on_request
         )
-        self.polygon_sides_input.valueChanged.connect(self._refresh)
-        self.randomize_size_input.toggled.connect(self._random_size_changed)
-        self.regenerate_random_button.clicked.connect(self._regenerate_random)
-        self._random_size_changed()
         self._update_opening_controls()
+        self._update_random_controls()
         return panel
 
     def _choose_input(self) -> None:
@@ -589,10 +715,18 @@ class MainWindow(QMainWindow):
             self.inner_margin_input,
             self.perforation_export_input,
             self.target_open_area_input,
-            self.randomize_size_input,
-            self.random_min_size_input,
-            self.random_max_size_input,
-            self.random_min_gap_input,
+            self.randomize_width_input,
+            self.randomize_height_input,
+            self.randomize_horizontal_gap_input,
+            self.randomize_vertical_gap_input,
+            self.random_min_width_input,
+            self.random_max_width_input,
+            self.random_min_height_input,
+            self.random_max_height_input,
+            self.random_min_horizontal_gap_input,
+            self.random_max_horizontal_gap_input,
+            self.random_min_vertical_gap_input,
+            self.random_max_vertical_gap_input,
         )
         previous_signal_states = [
             (field, field.blockSignals(True)) for field in fields
@@ -623,12 +757,30 @@ class MainWindow(QMainWindow):
             self.target_open_area_input.setValue(
                 settings.target_open_area_percentage
             )
-            self.randomize_size_input.setChecked(
-                settings.randomize_opening_size
+            self.randomize_width_input.setChecked(settings.randomize_width)
+            self.randomize_height_input.setChecked(settings.randomize_height)
+            self.randomize_horizontal_gap_input.setChecked(
+                settings.randomize_horizontal_gap
             )
-            self.random_min_size_input.setValue(settings.random_min_size_mm)
-            self.random_max_size_input.setValue(settings.random_max_size_mm)
-            self.random_min_gap_input.setValue(settings.random_min_gap_mm)
+            self.randomize_vertical_gap_input.setChecked(
+                settings.randomize_vertical_gap
+            )
+            self.random_min_width_input.setValue(settings.random_min_width_mm)
+            self.random_max_width_input.setValue(settings.random_max_width_mm)
+            self.random_min_height_input.setValue(settings.random_min_height_mm)
+            self.random_max_height_input.setValue(settings.random_max_height_mm)
+            self.random_min_horizontal_gap_input.setValue(
+                settings.random_min_horizontal_gap_mm
+            )
+            self.random_max_horizontal_gap_input.setValue(
+                settings.random_max_horizontal_gap_mm
+            )
+            self.random_min_vertical_gap_input.setValue(
+                settings.random_min_vertical_gap_mm
+            )
+            self.random_max_vertical_gap_input.setValue(
+                settings.random_max_vertical_gap_mm
+            )
             self.random_seed = settings.random_seed
             self.perforation_export_input.setCurrentIndex(
                 self.perforation_export_input.findData(
@@ -645,8 +797,12 @@ class MainWindow(QMainWindow):
         finally:
             for field, previous_state in previous_signal_states:
                 field.blockSignals(previous_state)
-        self._opening_type_changed()
+        self._update_opening_controls()
         self._update_random_controls()
+        if settings.layout_mode == "random":
+            self._layout_mode_changed()
+        else:
+            self._refresh()
 
     def _choose_output(self) -> None:
         filename, _ = QFileDialog.getSaveFileName(
@@ -663,42 +819,272 @@ class MainWindow(QMainWindow):
 
     def _opening_type_changed(self, *_args) -> None:
         self._update_opening_controls()
-        self._refresh()
+        self._parameters_changed()
 
-    def _random_size_changed(self, *_args) -> None:
+    def _parameters_changed(self, *_args) -> None:
         self._update_random_controls()
+        if self.layout_mode_input.currentData() == "random":
+            self._random_result_current = False
+            self.export_button.setEnabled(False)
+            self.status.setStyleSheet("color: #fbbf24;")
+            self.status.setText(
+                "Parametry zmienione — kliknij „Losuj losowy układ”, "
+                "aby przeliczyć perforację."
+            )
+            return
         self._refresh()
 
-    def _regenerate_random(self) -> None:
-        self.random_seed = secrets.randbits(32)
+    def _layout_mode_changed(self, *_args) -> None:
+        self._update_random_controls()
+        if self.layout_mode_input.currentData() == "random":
+            self._random_result_current = False
+            self.preview_material = None
+            self.preview_holes = []
+            self.preview_opening = None
+            self.preview_hole_shapes = []
+            self.output_preview.set_data(None)
+            self.export_button.setEnabled(False)
+            self.status.setStyleSheet("color: #9aa9bd;")
+            self.status.setText(
+                "Kliknij „Losuj losowy układ”, aby utworzyć perforację."
+            )
+            return
         self._refresh()
+
+    def _generate_random_on_request(self) -> None:
+        if self.drawing is None or self._random_thread is not None:
+            return
+        try:
+            material = resize_material(
+                self.drawing.material,
+                self.width_input.value(),
+                self.height_input.value(),
+            )
+            opening_shape = make_opening_shape(
+                self.opening_type_input.currentData(),
+                self.opening_width_input.value(),
+                self.opening_height_input.value(),
+                self.polygon_sides_input.value(),
+                self.custom_opening,
+            )
+            opening_bounds = opening_shape.bounds
+            fixed_width = opening_bounds[2] - opening_bounds[0]
+            fixed_height = opening_bounds[3] - opening_bounds[1]
+            min_width = (
+                self.random_min_width_input.value()
+                if self.randomize_width_input.isChecked()
+                else fixed_width
+            )
+            max_width = (
+                self.random_max_width_input.value()
+                if self.randomize_width_input.isChecked()
+                else fixed_width
+            )
+            min_height = (
+                self.random_min_height_input.value()
+                if self.randomize_height_input.isChecked()
+                else fixed_height
+            )
+            max_height = (
+                self.random_max_height_input.value()
+                if self.randomize_height_input.isChecked()
+                else fixed_height
+            )
+            if self.opening_type_input.currentData() == "circle":
+                min_height = min_width
+                max_height = max_width
+            min_horizontal_gap = (
+                self.random_min_horizontal_gap_input.value()
+                if self.randomize_horizontal_gap_input.isChecked()
+                else self.spacing_input.value()
+            )
+            max_horizontal_gap = (
+                self.random_max_horizontal_gap_input.value()
+                if self.randomize_horizontal_gap_input.isChecked()
+                else self.spacing_input.value()
+            )
+            min_vertical_gap = (
+                self.random_min_vertical_gap_input.value()
+                if self.randomize_vertical_gap_input.isChecked()
+                else self.spacing_input.value()
+            )
+            max_vertical_gap = (
+                self.random_max_vertical_gap_input.value()
+                if self.randomize_vertical_gap_input.isChecked()
+                else self.spacing_input.value()
+            )
+            target_percentage = self.target_open_area_input.value()
+            margin = self.margin_input.value()
+            inner_margin = self.inner_margin_input.value()
+            angle = self.angle_input.value()
+            self.random_seed = secrets.randbits(32)
+            seed = self.random_seed
+        except ValueError as error:
+            self.status.setStyleSheet("color: #fb7185;")
+            self.status.setText(str(error))
+            return
+
+        def calculate(
+            progress: Callable[[int], None],
+            cancellation_requested: Callable[[], bool],
+        ) -> list[tuple[float, float, BaseGeometry]]:
+            return generate_random_holes(
+                material,
+                opening_shape,
+                target_percentage,
+                min_width,
+                max_width,
+                min_height,
+                max_height,
+                min_horizontal_gap,
+                max_horizontal_gap,
+                min_vertical_gap,
+                max_vertical_gap,
+                margin,
+                inner_margin_mm=inner_margin,
+                angle_degrees=angle,
+                seed=seed,
+                progress_callback=progress,
+                cancellation_requested=cancellation_requested,
+            )
+
+        self._random_cancellation = Event()
+        self._random_progress = QProgressDialog(
+            "Obliczanie losowego układu…",
+            "Anuluj",
+            0,
+            100,
+            self,
+        )
+        self._random_progress.setWindowTitle("Losowa perforacja")
+        self._random_progress.setWindowModality(Qt.WindowModal)
+        self._random_progress.setMinimumDuration(0)
+        self._random_progress.setAutoClose(False)
+        self._random_progress.canceled.connect(
+            self._random_cancellation.set
+        )
+        self._random_thread = QThread(self)
+        self._random_pending_material = material
+        self._random_pending_opening = opening_shape
+        self._random_worker = RandomPerforationWorker(
+            calculate, self._random_cancellation
+        )
+        self._random_worker.moveToThread(self._random_thread)
+        self._random_thread.started.connect(self._random_worker.run)
+        self._random_worker.progress.connect(self._random_progress.setValue)
+        self._random_worker.completed.connect(
+            self._random_generation_finished
+        )
+        self._random_worker.failed.connect(self._random_generation_failed)
+        self._random_worker.cancelled.connect(self._random_generation_cancelled)
+        self._random_worker.completed.connect(self._random_thread.quit)
+        self._random_worker.failed.connect(self._random_thread.quit)
+        self._random_worker.cancelled.connect(self._random_thread.quit)
+        self._random_thread.finished.connect(self._random_worker.deleteLater)
+        self._random_thread.finished.connect(self._random_thread.deleteLater)
+        self._random_thread.finished.connect(self._random_generation_stopped)
+        self.regenerate_random_button.setEnabled(False)
+        self.export_button.setEnabled(False)
+        self._random_progress.open()
+        self._random_thread.start()
+
+    def _random_generation_finished(
+        self,
+        result: list[tuple[float, float, BaseGeometry]],
+    ) -> None:
+        if self._random_progress is not None:
+            self._random_progress.setValue(100)
+        if (
+            self._random_pending_material is None
+            or self._random_pending_opening is None
+        ):
+            self._random_generation_failed(
+                "Nie udało się odczytać geometrii perforacji."
+            )
+            return
+        holes = [(x, y) for x, y, _shape in result]
+        hole_shapes = [shape for _x, _y, shape in result]
+        self._random_result_current = True
+        self._set_preview(
+            self._random_pending_material,
+            self._random_pending_opening,
+            holes,
+            hole_shapes,
+        )
+
+    def _random_generation_failed(self, message: str) -> None:
+        self._random_result_current = False
+        self.status.setStyleSheet("color: #fb7185;")
+        self.status.setText(message)
+
+    def _random_generation_cancelled(self) -> None:
+        self._random_result_current = False
+        self.status.setStyleSheet("color: #fbbf24;")
+        self.status.setText(
+            "Losowanie anulowane. Kliknij „Losuj losowy układ”, "
+            "aby spróbować ponownie."
+        )
+
+    def _random_generation_stopped(self) -> None:
+        if self._random_progress is not None:
+            self._random_progress.close()
+            self._random_progress.deleteLater()
+        self.regenerate_random_button.setEnabled(True)
+        self._random_progress = None
+        self._random_cancellation = None
+        self._random_worker = None
+        self._random_thread = None
+        self._random_pending_material = None
+        self._random_pending_opening = None
 
     def _update_random_controls(self) -> None:
         is_random = self.layout_mode_input.currentData() == "random"
-        random_size = is_random and self.randomize_size_input.isChecked()
+        random_width = is_random and self.randomize_width_input.isChecked()
+        random_height = is_random and self.randomize_height_input.isChecked()
+        random_horizontal_gap = (
+            is_random and self.randomize_horizontal_gap_input.isChecked()
+        )
+        random_vertical_gap = (
+            is_random and self.randomize_vertical_gap_input.isChecked()
+        )
         for widget in (
             self.random_target_label,
             self.target_open_area_input,
-            self.randomize_size_label,
-            self.randomize_size_input,
-            self.random_min_gap_label,
-            self.random_min_gap_input,
+            self.randomize_width_input,
+            self.random_width_range_label,
+            self.randomize_height_input,
+            self.random_height_range_label,
+            self.randomize_horizontal_gap_input,
+            self.randomize_vertical_gap_input,
             self.regenerate_random_button,
         ):
             widget.setVisible(is_random)
-        for widget in (
-            self.random_min_size_label,
-            self.random_min_size_input,
-            self.random_max_size_label,
-            self.random_max_size_input,
-        ):
-            widget.setVisible(random_size)
+        self.random_width_range.setVisible(random_width)
+        self.random_height_range.setVisible(random_height)
+        self.random_horizontal_gap_range_label.setVisible(
+            random_horizontal_gap
+        )
+        self.random_horizontal_gap_range.setVisible(random_horizontal_gap)
+        self.random_vertical_gap_range_label.setVisible(random_vertical_gap)
+        self.random_vertical_gap_range.setVisible(random_vertical_gap)
         self.pattern_input.setVisible(not is_random)
         self.pattern_label.setVisible(not is_random)
-        self.spacing_label.setVisible(not is_random)
-        self.spacing_input.setVisible(not is_random)
+        fixed_gaps_remain = not random_horizontal_gap or not random_vertical_gap
+        self.spacing_label.setVisible(not is_random or fixed_gaps_remain)
+        self.spacing_input.setVisible(
+            not is_random or fixed_gaps_remain
+        )
+        if is_random and fixed_gaps_remain:
+            if not random_horizontal_gap and not random_vertical_gap:
+                self.spacing_label.setText("Stały odstęp poziomy i pionowy:")
+            elif not random_horizontal_gap:
+                self.spacing_label.setText("Stały odstęp poziomy:")
+            else:
+                self.spacing_label.setText("Stały odstęp pionowy:")
         self.spacing_mode_label.setVisible(not is_random)
         self.spacing_mode.setVisible(not is_random)
+        if not is_random:
+            self.spacing_label.setText("Odstęp / podziałka:")
         self.angle_label.setText(
             "Kąt otworów:" if is_random else "Kąt siatki:"
         )
@@ -708,6 +1094,14 @@ class MainWindow(QMainWindow):
 
     def _update_opening_controls(self) -> None:
         opening_type = self.opening_type_input.currentData()
+        circular_opening = opening_type == "circle"
+        if circular_opening and self.randomize_height_input.isChecked():
+            previous_state = self.randomize_height_input.blockSignals(True)
+            self.randomize_height_input.setChecked(False)
+            self.randomize_height_input.blockSignals(previous_state)
+        self.randomize_height_input.setEnabled(not circular_opening)
+        self.random_height_range_label.setEnabled(not circular_opening)
+        self.random_height_range.setEnabled(not circular_opening)
         self.opening_width_label.setText(
             {
                 "circle": "Średnica otworu:",
@@ -733,11 +1127,11 @@ class MainWindow(QMainWindow):
         self.custom_opening_row.setVisible(show_custom)
         self.custom_opening_row_label.setVisible(show_custom)
         if opening_type == "slot":
-            self.random_min_size_label.setText("Minimalna długość fasolki:")
-            self.random_max_size_label.setText("Maksymalna długość fasolki:")
+            self.random_width_range_label.setText("Zakres długości fasolki:")
+            self.random_height_range_label.setText("Zakres szerokości fasolki:")
         else:
-            self.random_min_size_label.setText("Minimalny rozmiar otworu:")
-            self.random_max_size_label.setText("Maksymalny rozmiar otworu:")
+            self.random_width_range_label.setText("Zakres szerokości:")
+            self.random_height_range_label.setText("Zakres wysokości:")
 
     def _choose_opening_shape(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -782,6 +1176,9 @@ class MainWindow(QMainWindow):
     def _refresh(self, *_args) -> None:
         if self.drawing is None:
             return
+        if self.layout_mode_input.currentData() == "random":
+            self._parameters_changed()
+            return
         self.spacing_label.setText(
             "Podziałka po przekątnej:"
             if self.pattern_input.currentData() == "staggered"
@@ -801,47 +1198,17 @@ class MainWindow(QMainWindow):
                 self.polygon_sides_input.value(),
                 self.custom_opening,
             )
-            if self.layout_mode_input.currentData() == "random":
-                min_size = (
-                    self.random_min_size_input.value()
-                    if self.randomize_size_input.isChecked()
-                    else self.opening_width_input.value()
-                )
-                max_size = (
-                    self.random_max_size_input.value()
-                    if self.randomize_size_input.isChecked()
-                    else self.opening_width_input.value()
-                )
-                generated = generate_random_holes(
-                    material,
-                    opening_shape,
-                    self.target_open_area_input.value(),
-                    min_size,
-                    max_size,
-                    self.random_min_gap_input.value(),
-                    self.margin_input.value(),
-                    inner_margin_mm=self.inner_margin_input.value(),
-                    angle_degrees=self.angle_input.value(),
-                    vary_length_only=(
-                        self.opening_type_input.currentData() == "slot"
-                    ),
-                    seed=self.random_seed,
-                )
-                holes = [(hole[0], hole[1]) for hole in generated]
-                hole_shapes = [hole[2] for hole in generated]
-            else:
-                holes = generate_holes(
-                    material,
-                    opening_shape,
-                    self.spacing_input.value(),
-                    self.margin_input.value(),
-                    self.angle_input.value(),
-                    self.pattern_input.currentData(),
-                    self.spacing_mode.currentData(),
-                    inner_margin_mm=self.inner_margin_input.value(),
-                    opening_angle_degrees=self.opening_angle_input.value(),
-                )
-                hole_shapes = []
+            holes = generate_holes(
+                material,
+                opening_shape,
+                self.spacing_input.value(),
+                self.margin_input.value(),
+                self.angle_input.value(),
+                self.pattern_input.currentData(),
+                self.spacing_mode.currentData(),
+                inner_margin_mm=self.inner_margin_input.value(),
+                opening_angle_degrees=self.opening_angle_input.value(),
+            )
         except ValueError as error:
             self.preview_material = None
             self.preview_holes = []
@@ -852,10 +1219,22 @@ class MainWindow(QMainWindow):
             self.status.setText(str(error))
             self.status.setStyleSheet("color: #fb7185;")
             return
+        self._random_result_current = True
+        self._set_preview(material, opening_shape, holes, [])
+
+    def _set_preview(
+        self,
+        material: BaseGeometry,
+        opening_shape: BaseGeometry,
+        holes: list[tuple[float, float]],
+        hole_shapes: list[BaseGeometry],
+    ) -> None:
+        assert self.drawing is not None
         self.preview_material = material
         self.preview_holes = holes
         self.preview_opening = opening_shape
         self.preview_hole_shapes = hole_shapes
+        is_random = self.layout_mode_input.currentData() == "random"
         self.output_preview.set_data(
             material,
             holes,
@@ -864,14 +1243,10 @@ class MainWindow(QMainWindow):
             self.angle_input.value(),
             self.opening_type_input.currentData(),
             self.inner_margin_input.value(),
-            (
-                0.0
-                if self.layout_mode_input.currentData() == "random"
-                else self.opening_angle_input.value()
-            ),
+            0.0 if is_random else self.opening_angle_input.value(),
             hole_shapes,
         )
-        self.export_button.setEnabled(bool(holes))
+        self.export_button.setEnabled(bool(holes) and self._random_result_current)
         self.status.setStyleSheet("color: #9aa9bd;")
         min_x, min_y, max_x, max_y = material.bounds
         open_area = (
@@ -884,7 +1259,7 @@ class MainWindow(QMainWindow):
             f"Liczba otworów: {len(holes):,}",
             f"Stopień prześwitu: {open_area:.1f}%",
         ]
-        if self.layout_mode_input.currentData() == "random":
+        if is_random:
             target = self.target_open_area_input.value()
             messages.append(f"Cel prześwitu: {target:.1f}%")
             if abs(open_area - target) > 0.5:
@@ -896,7 +1271,7 @@ class MainWindow(QMainWindow):
             messages.extend(self.custom_opening_warnings)
         if not holes:
             messages.append(
-                "Brak otworów: zmniejsz margines lub wymiary otworu."
+                "Brak otworów: zmień wymiary, margines lub odstęp."
             )
         self.status.setText("  |  ".join(messages))
 
@@ -905,6 +1280,7 @@ class MainWindow(QMainWindow):
             self.preview_material is None
             or self.preview_opening is None
             or not self.preview_holes
+            or not self._random_result_current
         ):
             return
         filename = self.output_path.text().strip()
@@ -996,10 +1372,28 @@ class MainWindow(QMainWindow):
             perforation_as_block=self.perforation_export_input.currentData(),
             layout_mode=self.layout_mode_input.currentData(),
             target_open_area_percentage=self.target_open_area_input.value(),
-            randomize_opening_size=self.randomize_size_input.isChecked(),
-            random_min_size_mm=self.random_min_size_input.value(),
-            random_max_size_mm=self.random_max_size_input.value(),
-            random_min_gap_mm=self.random_min_gap_input.value(),
+            random_min_width_mm=self.random_min_width_input.value(),
+            random_max_width_mm=self.random_max_width_input.value(),
+            random_min_height_mm=self.random_min_height_input.value(),
+            random_max_height_mm=self.random_max_height_input.value(),
+            randomize_width=self.randomize_width_input.isChecked(),
+            randomize_height=self.randomize_height_input.isChecked(),
+            randomize_horizontal_gap=(
+                self.randomize_horizontal_gap_input.isChecked()
+            ),
+            randomize_vertical_gap=self.randomize_vertical_gap_input.isChecked(),
+            random_min_horizontal_gap_mm=(
+                self.random_min_horizontal_gap_input.value()
+            ),
+            random_max_horizontal_gap_mm=(
+                self.random_max_horizontal_gap_input.value()
+            ),
+            random_min_vertical_gap_mm=(
+                self.random_min_vertical_gap_input.value()
+            ),
+            random_max_vertical_gap_mm=(
+                self.random_max_vertical_gap_input.value()
+            ),
             random_seed=self.random_seed,
             custom_opening=(
                 self.custom_opening if opening_type == "custom" else None

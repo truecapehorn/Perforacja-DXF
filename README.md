@@ -141,11 +141,16 @@ Wymiary kształtów i odstępy podaje się w milimetrach.
   odstępach poziomo i pionowo.
 - **Układ mijankowy** przesuwa co drugi rząd o połowę podziałki.
 - **Układ losowy** rozmieszcza otwory w losowych miejscach, bez nakładania i
-  z zachowaniem marginesów. Można ustawić docelowy stopień prześwitu,
-  minimalny odstęp oraz włączyć losowanie rozmiaru z zakresu min–max.
-  Dla fasolki losowana jest jej długość, a szerokość pozostaje stała;
-  dla pozostałych kształtów zmienia się rozmiar z zachowaniem proporcji.
-  Przycisk **Losuj nowy układ** tworzy inną kompozycję. Przy ograniczonym
+  z zachowaniem marginesów. Rozkłada perforację na całej dostępnej wysokości
+  detalu zamiast kończyć układanie w dolnej części po osiągnięciu celu
+  prześwitu. Można ustawić docelowy stopień prześwitu,
+  wybrać niezależnie losowanie szerokości, wysokości oraz odstępu poziomego
+  i pionowego, podając zakres min–max każdego losowanego parametru.
+  Niezaznaczone wymiary są stałe i wynikają z ustawionego kształtu otworu;
+  niezaznaczony odstęp korzysta z parametru odstępu z trybu siatki. Układ jest
+  przeliczany wyłącznie po kliknięciu
+  **Losuj losowy układ**. Podczas obliczeń działa okno postępu z możliwością
+  anulowania, a interfejs pozostaje responsywny. Przy ograniczonym
   miejscu lub dużym odstępie osiągnięty prześwit może różnić się od celu;
   pasek statusu pokazuje wynik i informuje o niedopasowaniu.
 - **Tryb odległości — odstęp między krawędziami** oznacza minimalną
@@ -236,6 +241,10 @@ zmienia sposób organizacji otworów w DXF, nie ich geometrię.
 ## Poprawki
 
 - #### ver 6
-  
  - [x] Eksportowanie obok dxf również pliku z konfiguracją danej perforacji. Stworzyć mozliwosc ładowania tych ustawien z tego pliku.
  - [x] Dla pliku build_exe.bat czy jest mozliwosc skopiowania utworzonego pliku exe do katalogu google G:\Mój dysk!!Projekty\Perforacja-DXF"katalog nazwa pliku\nawa pliku.exe" i Z:\BACKUPS\INSTALKI"katalog nazwa pliku\nawa pliku.exe". Do katalogu z nazwa pliku?. Oczywiscie jak dany komputer ma dostep. Jak nie to zeby była informacja ze nie skopiowało go.
+
+- #### ver 7
+- [x] Dla układu losowego nowa perforacja powstaje po kliknięciu **Losuj losowy układ**.
+- [x] Można niezależnie wybrać losowanie szerokości, wysokości i odstępu oraz zakresy min–max; niezaznaczone parametry pozostają stałe.
+- [x] Losowanie działa w tle i pokazuje postęp z możliwością anulowania.

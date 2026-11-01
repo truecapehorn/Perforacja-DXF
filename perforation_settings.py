@@ -10,8 +10,8 @@ from shapely.errors import GEOSException
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 
-_VERSION = 2
-_SUPPORTED_VERSIONS = {1, 2}
+_VERSION = 4
+_SUPPORTED_VERSIONS = {1, 2, 3, 4}
 _PATTERNS = {"square", "staggered"}
 _LAYOUT_MODES = {"grid", "random"}
 _OPENING_TYPES = {
@@ -46,10 +46,18 @@ class PerforationSettings:
     custom_opening: BaseGeometry | None = None
     layout_mode: str = "grid"
     target_open_area_percentage: float = 30.0
-    randomize_opening_size: bool = True
-    random_min_size_mm: float = 10.0
-    random_max_size_mm: float = 20.0
-    random_min_gap_mm: float = 2.0
+    randomize_width: bool = True
+    randomize_height: bool = False
+    randomize_horizontal_gap: bool = False
+    randomize_vertical_gap: bool = False
+    random_min_width_mm: float = 10.0
+    random_max_width_mm: float = 20.0
+    random_min_height_mm: float = 10.0
+    random_max_height_mm: float = 20.0
+    random_min_horizontal_gap_mm: float = 2.0
+    random_max_horizontal_gap_mm: float = 8.0
+    random_min_vertical_gap_mm: float = 2.0
+    random_max_vertical_gap_mm: float = 8.0
     random_seed: int = 0
 
     def __post_init__(self) -> None:
@@ -64,9 +72,14 @@ class PerforationSettings:
             "outer_margin_mm": (0.0, 5000.0),
             "inner_margin_mm": (0.0, 5000.0),
             "target_open_area_percentage": (0.1, 99.9),
-            "random_min_size_mm": (0.1, 5000.0),
-            "random_max_size_mm": (0.1, 5000.0),
-            "random_min_gap_mm": (0.0, 10_000.0),
+            "random_min_width_mm": (0.1, 5000.0),
+            "random_max_width_mm": (0.1, 5000.0),
+            "random_min_height_mm": (0.1, 5000.0),
+            "random_max_height_mm": (0.1, 5000.0),
+            "random_min_horizontal_gap_mm": (0.0, 10_000.0),
+            "random_max_horizontal_gap_mm": (0.0, 10_000.0),
+            "random_min_vertical_gap_mm": (0.0, 10_000.0),
+            "random_max_vertical_gap_mm": (0.0, 10_000.0),
         }
         for name, (minimum, maximum) in numeric_ranges.items():
             value = getattr(self, name)
@@ -102,10 +115,25 @@ class PerforationSettings:
             raise ValueError("Liczba boków musi mieścić się w zakresie 3–20.")
         if not isinstance(self.perforation_as_block, bool):
             raise ValueError("Nieprawidłowy sposób eksportu perforacji.")
-        if not isinstance(self.randomize_opening_size, bool):
-            raise ValueError("Nieprawidłowe ustawienie losowania rozmiaru.")
-        if self.random_min_size_mm > self.random_max_size_mm:
-            raise ValueError("Zakres losowanego rozmiaru jest nieprawidłowy.")
+        if any(
+            not isinstance(value, bool)
+            for value in (
+                self.randomize_width,
+                self.randomize_height,
+                self.randomize_horizontal_gap,
+                self.randomize_vertical_gap,
+            )
+        ):
+            raise ValueError("Nieprawidłowe ustawienie losowania parametru.")
+        if (
+            self.random_min_width_mm > self.random_max_width_mm
+            or self.random_min_height_mm > self.random_max_height_mm
+            or self.random_min_horizontal_gap_mm
+            > self.random_max_horizontal_gap_mm
+            or self.random_min_vertical_gap_mm
+            > self.random_max_vertical_gap_mm
+        ):
+            raise ValueError("Zakres losowanego parametru jest nieprawidłowy.")
         if (
             isinstance(self.random_seed, bool)
             or not isinstance(self.random_seed, int)
@@ -149,10 +177,18 @@ def save_perforation_settings(
         "custom_opening_wkb": custom_opening,
         "layout_mode": settings.layout_mode,
         "target_open_area_percentage": settings.target_open_area_percentage,
-        "randomize_opening_size": settings.randomize_opening_size,
-        "random_min_size_mm": settings.random_min_size_mm,
-        "random_max_size_mm": settings.random_max_size_mm,
-        "random_min_gap_mm": settings.random_min_gap_mm,
+        "randomize_width": settings.randomize_width,
+        "randomize_height": settings.randomize_height,
+        "randomize_horizontal_gap": settings.randomize_horizontal_gap,
+        "randomize_vertical_gap": settings.randomize_vertical_gap,
+        "random_min_width_mm": settings.random_min_width_mm,
+        "random_max_width_mm": settings.random_max_width_mm,
+        "random_min_height_mm": settings.random_min_height_mm,
+        "random_max_height_mm": settings.random_max_height_mm,
+        "random_min_horizontal_gap_mm": settings.random_min_horizontal_gap_mm,
+        "random_max_horizontal_gap_mm": settings.random_max_horizontal_gap_mm,
+        "random_min_vertical_gap_mm": settings.random_min_vertical_gap_mm,
+        "random_max_vertical_gap_mm": settings.random_max_vertical_gap_mm,
         "random_seed": settings.random_seed,
     }
     Path(path).write_text(
@@ -172,6 +208,16 @@ def load_perforation_settings(
             f"Nieobsługiwana wersja konfiguracji: {data['version']}."
         )
     try:
+        legacy_min_size = data.get("random_min_size_mm", 10.0)
+        legacy_max_size = data.get("random_max_size_mm", 20.0)
+        legacy_randomize_size = data.get("randomize_opening_size", True)
+        legacy_randomize_gap = data.get("randomize_gap", False)
+        legacy_gap = data.get("random_min_gap_mm", 2.0)
+        legacy_max_gap = data.get("random_max_gap_mm", legacy_gap)
+        layout_mode = data.get("layout_mode", "grid")
+        spacing_mm = data["spacing_mm"]
+        if data["version"] == 2 and layout_mode == "random":
+            spacing_mm = legacy_gap
         custom_wkb = data["custom_opening_wkb"]
         if custom_wkb is not None and not isinstance(custom_wkb, str):
             raise ValueError("Nieprawidłowe dane własnego kształtu.")
@@ -188,7 +234,7 @@ def load_perforation_settings(
             opening_width_mm=data["opening_width_mm"],
             opening_height_mm=data["opening_height_mm"],
             polygon_sides=data["polygon_sides"],
-            spacing_mm=data["spacing_mm"],
+            spacing_mm=spacing_mm,
             spacing_mode=data["spacing_mode"],
             grid_angle_degrees=data["grid_angle_degrees"],
             opening_angle_degrees=data["opening_angle_degrees"],
@@ -196,14 +242,44 @@ def load_perforation_settings(
             inner_margin_mm=data["inner_margin_mm"],
             perforation_as_block=data["perforation_as_block"],
             custom_opening=custom_opening,
-            layout_mode=data.get("layout_mode", "grid"),
+            layout_mode=layout_mode,
             target_open_area_percentage=data.get(
                 "target_open_area_percentage", 30.0
             ),
-            randomize_opening_size=data.get("randomize_opening_size", True),
-            random_min_size_mm=data.get("random_min_size_mm", 10.0),
-            random_max_size_mm=data.get("random_max_size_mm", 20.0),
-            random_min_gap_mm=data.get("random_min_gap_mm", 2.0),
+            randomize_width=data.get(
+                "randomize_width", legacy_randomize_size
+            ),
+            randomize_height=data.get("randomize_height", False),
+            randomize_horizontal_gap=data.get(
+                "randomize_horizontal_gap", legacy_randomize_gap
+            ),
+            randomize_vertical_gap=data.get(
+                "randomize_vertical_gap", legacy_randomize_gap
+            ),
+            random_min_width_mm=data.get(
+                "random_min_width_mm", legacy_min_size
+            ),
+            random_max_width_mm=data.get(
+                "random_max_width_mm", legacy_max_size
+            ),
+            random_min_height_mm=data.get(
+                "random_min_height_mm", data["opening_height_mm"]
+            ),
+            random_max_height_mm=data.get(
+                "random_max_height_mm", data["opening_height_mm"]
+            ),
+            random_min_horizontal_gap_mm=data.get(
+                "random_min_horizontal_gap_mm", legacy_gap
+            ),
+            random_max_horizontal_gap_mm=data.get(
+                "random_max_horizontal_gap_mm", legacy_max_gap
+            ),
+            random_min_vertical_gap_mm=data.get(
+                "random_min_vertical_gap_mm", legacy_gap
+            ),
+            random_max_vertical_gap_mm=data.get(
+                "random_max_vertical_gap_mm", legacy_max_gap
+            ),
             random_seed=data.get("random_seed", 0),
         )
     except KeyError as error:

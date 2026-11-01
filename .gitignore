@@ -6,3 +6,4 @@ dist/
 temp/
 *.spec
 examples/
+CHANGELOG_LOCAL.md

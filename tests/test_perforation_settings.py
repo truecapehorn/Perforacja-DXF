@@ -48,10 +48,18 @@ def test_random_settings_round_trip_preserves_generation_options(tmp_path):
         make_settings(),
         layout_mode="random",
         target_open_area_percentage=22.5,
-        randomize_opening_size=False,
-        random_min_size_mm=6.0,
-        random_max_size_mm=18.0,
-        random_min_gap_mm=1.5,
+        randomize_width=True,
+        randomize_height=True,
+        randomize_horizontal_gap=True,
+        randomize_vertical_gap=True,
+        random_min_width_mm=6.0,
+        random_max_width_mm=18.0,
+        random_min_height_mm=3.0,
+        random_max_height_mm=9.0,
+        random_min_horizontal_gap_mm=1.5,
+        random_max_horizontal_gap_mm=4.5,
+        random_min_vertical_gap_mm=2.5,
+        random_max_vertical_gap_mm=5.5,
         random_seed=12345,
     )
 
@@ -69,19 +77,81 @@ def test_settings_load_version_one_without_random_options(tmp_path):
     for key in (
         "layout_mode",
         "target_open_area_percentage",
-        "randomize_opening_size",
-        "random_min_size_mm",
-        "random_max_size_mm",
+        "randomize_width",
+        "randomize_height",
+        "randomize_gap",
+        "randomize_horizontal_gap",
+        "randomize_vertical_gap",
+        "random_min_width_mm",
+        "random_max_width_mm",
+        "random_min_height_mm",
+        "random_max_height_mm",
         "random_min_gap_mm",
+        "random_max_gap_mm",
+        "random_min_horizontal_gap_mm",
+        "random_max_horizontal_gap_mm",
+        "random_min_vertical_gap_mm",
+        "random_max_vertical_gap_mm",
         "random_seed",
     ):
-        data.pop(key)
+        data.pop(key, None)
     path.write_text(json.dumps(data), encoding="utf-8")
 
     loaded = load_perforation_settings(path)
 
-    assert loaded == settings
+    assert loaded == replace(
+        settings,
+        random_min_height_mm=settings.opening_height_mm,
+        random_max_height_mm=settings.opening_height_mm,
+        random_max_vertical_gap_mm=settings.random_min_vertical_gap_mm,
+        random_max_horizontal_gap_mm=settings.random_min_horizontal_gap_mm,
+    )
     assert loaded.layout_mode == "grid"
+
+
+def test_settings_migrate_version_two_random_options(tmp_path):
+    path = tmp_path / "version_two.json"
+    settings = make_settings()
+    save_perforation_settings(path, settings)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["version"] = 2
+    data["layout_mode"] = "random"
+    data["randomize_opening_size"] = False
+    data["random_min_size_mm"] = 7.0
+    data["random_max_size_mm"] = 17.0
+    data["random_min_gap_mm"] = 3.0
+    data["randomize_gap"] = True
+    for key in (
+        "randomize_width",
+        "randomize_height",
+        "randomize_horizontal_gap",
+        "randomize_vertical_gap",
+        "random_min_width_mm",
+        "random_max_width_mm",
+        "random_min_height_mm",
+        "random_max_height_mm",
+        "random_max_gap_mm",
+        "random_min_horizontal_gap_mm",
+        "random_max_horizontal_gap_mm",
+        "random_min_vertical_gap_mm",
+        "random_max_vertical_gap_mm",
+    ):
+        data.pop(key, None)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = load_perforation_settings(path)
+
+    assert loaded.randomize_width is False
+    assert loaded.randomize_height is False
+    assert loaded.randomize_horizontal_gap is True
+    assert loaded.randomize_vertical_gap is True
+    assert loaded.random_min_width_mm == 7.0
+    assert loaded.random_max_width_mm == 17.0
+    assert loaded.random_min_horizontal_gap_mm == 3.0
+    assert loaded.random_max_horizontal_gap_mm == 3.0
+    assert loaded.random_min_vertical_gap_mm == 3.0
+    assert loaded.random_max_vertical_gap_mm == 3.0
+    assert loaded.spacing_mm == 3.0
 
 
 def test_settings_round_trip_preserves_custom_opening_geometry(tmp_path):
@@ -102,7 +172,7 @@ def test_settings_round_trip_preserves_custom_opening_geometry(tmp_path):
 
 def test_settings_reject_unsupported_version(tmp_path):
     path = tmp_path / "future.json"
-    path.write_text(json.dumps({"version": 3}), encoding="utf-8")
+    path.write_text(json.dumps({"version": 5}), encoding="utf-8")
 
     with pytest.raises(ValueError, match="Nieobsługiwana wersja"):
         load_perforation_settings(path)

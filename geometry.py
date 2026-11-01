@@ -4,7 +4,7 @@ import math
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 import ezdxf
 from ezdxf.path import make_path
@@ -310,21 +310,37 @@ def generate_random_holes(
     material: BaseGeometry,
     opening_shape: BaseGeometry,
     target_open_area_percentage: float,
-    min_size_mm: float,
-    max_size_mm: float,
-    min_gap_mm: float,
+    min_width_mm: float,
+    max_width_mm: float,
+    min_height_mm: float,
+    max_height_mm: float,
+    min_horizontal_gap_mm: float,
+    max_horizontal_gap_mm: float,
+    min_vertical_gap_mm: float,
+    max_vertical_gap_mm: float,
     margin_mm: float,
     inner_margin_mm: float | None = None,
     angle_degrees: float = 0.0,
-    vary_length_only: bool = False,
     seed: int = 0,
+    progress_callback: Callable[[int], None] | None = None,
+    cancellation_requested: Callable[[], bool] | None = None,
 ) -> list[tuple[float, float, BaseGeometry]]:
     if not 0 < target_open_area_percentage < 100:
         raise ValueError("Docelowy stopień prześwitu musi być między 0 a 100%.")
-    if min_size_mm <= 0 or max_size_mm < min_size_mm:
-        raise ValueError("Zakres rozmiaru otworu jest nieprawidłowy.")
-    if min_gap_mm < 0:
-        raise ValueError("Minimalny odstęp nie może być ujemny.")
+    if (
+        min_width_mm <= 0
+        or max_width_mm < min_width_mm
+        or min_height_mm <= 0
+        or max_height_mm < min_height_mm
+    ):
+        raise ValueError("Zakres wymiarów otworu jest nieprawidłowy.")
+    if (
+        min_horizontal_gap_mm < 0
+        or max_horizontal_gap_mm < min_horizontal_gap_mm
+        or min_vertical_gap_mm < 0
+        or max_vertical_gap_mm < min_vertical_gap_mm
+    ):
+        raise ValueError("Zakres odstępu między otworami jest nieprawidłowy.")
     if not opening_shape.is_valid or opening_shape.area <= 0:
         raise ValueError("Kształt otworu tworzy nieprawidłową geometrię.")
 
@@ -337,85 +353,141 @@ def generate_random_holes(
     base_height = max_y - min_y
     if base_width <= 0:
         raise ValueError("Kształt otworu nie ma prawidłowej szerokości.")
-    if vary_length_only and min_size_mm < base_height:
-        raise ValueError(
-            "Minimalna długość fasolki nie może być mniejsza od jej szerokości."
-        )
-    scale_factors = (min_size_mm / base_width, max_size_mm / base_width)
-    max_radius = max(
-        math.hypot(x * scale_factors[1], y * scale_factors[1])
-        for x in (min_x, max_x)
-        for y in (min_y, max_y)
-    )
-    max_radius = max(max_radius, base_height / 2)
-    cell_size = max(2 * max_radius + min_gap_mm, 1e-9)
-    buckets: dict[tuple[int, int], list[tuple[float, float, BaseGeometry]]] = {}
-    placed: list[tuple[float, float, BaseGeometry]] = []
+    if base_height <= 0:
+        raise ValueError("Kształt otworu nie ma prawidłowej wysokości.")
+    rows: list[list[tuple[float, float, BaseGeometry]]] = []
     prepared = prep(allowed)
     generator = random.Random(seed)
     area_target = material.area * target_open_area_percentage / 100
-    area_current = 0.0
-    rejected_candidates = 0
+    if progress_callback is not None:
+        progress_callback(0)
 
-    for _ in range(MAX_RANDOM_CANDIDATES):
-        if area_current >= area_target or len(placed) >= MAX_HOLES:
-            break
-        rejection_limit = max(2_000, min(20_000, len(placed) * 20))
-        if rejected_candidates >= rejection_limit:
-            break
-        size = generator.uniform(min_size_mm, max_size_mm)
-        factor = size / base_width
-        hole_shape = scale(
-            opening_shape,
-            xfact=factor,
-            yfact=1.0 if vary_length_only else factor,
-            origin=(0, 0),
-        )
-        oriented_shape = rotate(hole_shape, angle_degrees, origin=(0, 0))
-        x = generator.uniform(allowed.bounds[0], allowed.bounds[2])
-        y = generator.uniform(allowed.bounds[1], allowed.bounds[3])
-        translated = translate(oriented_shape, xoff=x, yoff=y)
-        if not prepared.covers(translated):
-            rejected_candidates += 1
-            continue
-
-        bucket = (math.floor(x / cell_size), math.floor(y / cell_size))
-        collides = False
-        for bucket_x in range(bucket[0] - 1, bucket[0] + 2):
-            for bucket_y in range(bucket[1] - 1, bucket[1] + 2):
-                for other_x, other_y, other_shape in buckets.get(
-                    (bucket_x, bucket_y), []
-                ):
-                    if math.hypot(x - other_x, y - other_y) > cell_size:
-                        continue
-                    distance = translated.distance(other_shape)
-                    if distance + 1e-7 < min_gap_mm or (
-                        min_gap_mm == 0
-                        and translated.intersection(other_shape).area > 1e-9
-                    ):
-                        collides = True
-                        break
-                if collides:
-                    break
-            if collides:
+    allowed_min_x, allowed_min_y, allowed_max_x, allowed_max_y = allowed.bounds
+    row_bottom = allowed_min_y
+    attempts = 0
+    while row_bottom < allowed_max_y and attempts < MAX_RANDOM_CANDIDATES:
+        if cancellation_requested is not None and cancellation_requested():
+            raise InterruptedError("Losowanie zostało anulowane.")
+        row_shapes: list[tuple[BaseGeometry, BaseGeometry, float, float]] = []
+        cursor_x = allowed_min_x
+        row_height = 0.0
+        while cursor_x < allowed_max_x and attempts < MAX_RANDOM_CANDIDATES:
+            if cancellation_requested is not None and cancellation_requested():
+                raise InterruptedError("Losowanie zostało anulowane.")
+            attempts += 1
+            width_mm = generator.uniform(min_width_mm, max_width_mm)
+            height_mm = generator.uniform(min_height_mm, max_height_mm)
+            hole_shape = scale(
+                opening_shape,
+                xfact=width_mm / base_width,
+                yfact=height_mm / base_height,
+                origin=(0, 0),
+            )
+            oriented_shape = rotate(hole_shape, angle_degrees, origin=(0, 0))
+            shape_bounds = oriented_shape.bounds
+            shape_width = shape_bounds[2] - shape_bounds[0]
+            shape_height = shape_bounds[3] - shape_bounds[1]
+            if cursor_x + shape_width > allowed_max_x:
                 break
-        if collides:
-            rejected_candidates += 1
-            continue
+            row_shapes.append((hole_shape, oriented_shape, cursor_x, shape_width))
+            row_height = max(row_height, shape_height)
+            horizontal_gap = generator.uniform(
+                min_horizontal_gap_mm, max_horizontal_gap_mm
+            )
+            cursor_x += shape_width + horizontal_gap
 
-        placed.append((x, y, hole_shape))
-        buckets.setdefault(bucket, []).append((x, y, translated))
-        area_current += hole_shape.area
-        rejected_candidates = 0
-
-    if area_current == 0:
+        if not row_shapes or row_height <= 0:
+            break
+        placed_row: list[tuple[float, float, BaseGeometry]] = []
+        for hole_shape, oriented_shape, cursor_x, _shape_width in row_shapes:
+            shape_bounds = oriented_shape.bounds
+            x = cursor_x - shape_bounds[0]
+            y = row_bottom - shape_bounds[1]
+            translated = translate(oriented_shape, xoff=x, yoff=y)
+            if not prepared.covers(translated):
+                continue
+            placed_row.append((x, y, hole_shape))
+        if placed_row:
+            rows.append(placed_row)
+        vertical_gap = generator.uniform(
+            min_vertical_gap_mm, max_vertical_gap_mm
+        )
+        row_bottom += row_height + vertical_gap
+        if progress_callback is not None:
+            progress_callback(
+                min(
+                    99,
+                    int(
+                        (row_bottom - allowed_min_y)
+                        / max(allowed_max_y - allowed_min_y, 1e-9)
+                        * 100
+                    ),
+                )
+            )
+    if not rows:
         return []
+
+    row_representatives = []
+    row_expansions = []
+    for row in rows:
+        start_index = generator.randrange(len(row))
+        row_representatives.append(row[start_index])
+        left_index = start_index - 1
+        right_index = start_index + 1
+        expansion = []
+        while left_index >= 0 or right_index < len(row):
+            if left_index >= 0 and (
+                right_index >= len(row) or generator.random() < 0.5
+            ):
+                expansion.append(row[left_index])
+                left_index -= 1
+            else:
+                expansion.append(row[right_index])
+                right_index += 1
+        row_expansions.append(expansion)
+    coverage_row_count = min(len(rows), MAX_HOLES)
+    while coverage_row_count > 1:
+        row_indices = [
+            round(index * (len(rows) - 1) / (coverage_row_count - 1))
+            for index in range(coverage_row_count)
+        ]
+        coverage_area = sum(
+            row_representatives[index][2].area for index in row_indices
+        )
+        if coverage_area <= area_target:
+            break
+        coverage_row_count -= 1
+    if coverage_row_count == 1:
+        row_indices = [round((len(rows) - 1) / 2)]
+
+    placed = [row_representatives[index] for index in row_indices]
+    area_current = sum(hole[2].area for hole in placed)
+
+    remaining_by_row = [row_expansions[index] for index in row_indices]
+    next_hole_by_row = [0] * len(remaining_by_row)
+    while area_current < area_target and len(placed) < MAX_HOLES:
+        added_hole = False
+        for index, row_holes in enumerate(remaining_by_row):
+            next_hole = next_hole_by_row[index]
+            if next_hole >= len(row_holes) or len(placed) >= MAX_HOLES:
+                continue
+            hole = row_holes[next_hole]
+            next_hole_by_row[index] += 1
+            placed.append(hole)
+            area_current += hole[2].area
+            added_hole = True
+            if area_current >= area_target or len(placed) >= MAX_HOLES:
+                break
+        if not added_hole:
+            break
 
     # Keep only the best-effort result at the requested open-area target.
     while placed and area_current - area_target > area_target - (
         area_current - placed[-1][2].area
     ):
         area_current -= placed.pop()[2].area
+    if progress_callback is not None:
+        progress_callback(100)
     return placed
 
 

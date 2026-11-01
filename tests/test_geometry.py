@@ -133,22 +133,30 @@ def test_random_holes_are_reproducible_sized_and_respect_clearance():
         material,
         opening,
         target_open_area_percentage=10,
-        min_size_mm=6,
-        max_size_mm=10,
-        min_gap_mm=2,
+        min_width_mm=6,
+        max_width_mm=10,
+        min_height_mm=4,
+        max_height_mm=4,
+        min_horizontal_gap_mm=2,
+        max_horizontal_gap_mm=2,
+        min_vertical_gap_mm=2,
+        max_vertical_gap_mm=2,
         margin_mm=5,
-        vary_length_only=True,
         seed=123,
     )
     repeated = generate_random_holes(
         material,
         opening,
         target_open_area_percentage=10,
-        min_size_mm=6,
-        max_size_mm=10,
-        min_gap_mm=2,
+        min_width_mm=6,
+        max_width_mm=10,
+        min_height_mm=4,
+        max_height_mm=4,
+        min_horizontal_gap_mm=2,
+        max_horizontal_gap_mm=2,
+        min_vertical_gap_mm=2,
+        max_vertical_gap_mm=2,
         margin_mm=5,
-        vary_length_only=True,
         seed=123,
     )
 
@@ -181,7 +189,7 @@ def test_random_holes_are_reproducible_sized_and_respect_clearance():
 def test_random_holes_reject_invalid_size_range():
     plate = Polygon([(0, 0), (50, 0), (50, 50), (0, 50)])
 
-    with pytest.raises(ValueError, match="Zakres rozmiaru"):
+    with pytest.raises(ValueError, match="Zakres wymiarów"):
         generate_random_holes(
             plate,
             make_opening_shape("circle", 5),
@@ -190,6 +198,251 @@ def test_random_holes_reject_invalid_size_range():
             5,
             0,
             0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
+
+
+def test_random_holes_can_vary_rectangle_width_height_and_spacing():
+    material = Polygon([(0, 0), (120, 0), (120, 120), (0, 120)])
+    opening = make_opening_shape("rectangle", 10, 8)
+
+    holes = generate_random_holes(
+        material,
+        opening,
+        target_open_area_percentage=12,
+        min_width_mm=6,
+        max_width_mm=14,
+        min_height_mm=4,
+        max_height_mm=10,
+        min_horizontal_gap_mm=1,
+        max_horizontal_gap_mm=4,
+        min_vertical_gap_mm=1,
+        max_vertical_gap_mm=4,
+        margin_mm=4,
+        seed=456,
+    )
+
+    assert len(holes) > 3
+    widths = {
+        round(shape.bounds[2] - shape.bounds[0], 1)
+        for _, _, shape in holes
+    }
+    heights = {
+        round(shape.bounds[3] - shape.bounds[1], 1)
+        for _, _, shape in holes
+    }
+    assert len(widths) > 1
+    assert len(heights) > 1
+    placed = [translate(shape, xoff=x, yoff=y) for x, y, shape in holes]
+    assert all(
+        first.distance(second) >= 1 - 1e-7
+        for index, first in enumerate(placed)
+        for second in placed[index + 1 :]
+    )
+
+
+def test_fixed_random_spacing_uses_even_rows_and_constant_horizontal_gap():
+    material = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+    opening = make_opening_shape("rectangle", 10, 8)
+
+    holes = generate_random_holes(
+        material,
+        opening,
+        target_open_area_percentage=12,
+        min_width_mm=6,
+        max_width_mm=14,
+        min_height_mm=8,
+        max_height_mm=8,
+        min_horizontal_gap_mm=3,
+        max_horizontal_gap_mm=3,
+        min_vertical_gap_mm=3,
+        max_vertical_gap_mm=3,
+        margin_mm=2,
+        seed=456,
+    )
+
+    placed = [
+        translate(shape, xoff=x, yoff=y)
+        for x, y, shape in holes
+    ]
+    rows: dict[float, list[Polygon]] = {}
+    for shape in placed:
+        rows.setdefault(round(shape.centroid.y, 6), []).append(shape)
+    row_centers = sorted(rows)
+    assert len(row_centers) > 1
+    assert all(
+        second - first == pytest.approx(11)
+        for first, second in zip(row_centers, row_centers[1:])
+    )
+    for row in rows.values():
+        row.sort(key=lambda shape: shape.bounds[0])
+        assert all(
+            first.distance(second) == pytest.approx(3)
+            for first, second in zip(row, row[1:])
+        )
+
+
+def test_random_horizontal_gap_keeps_vertical_spacing_fixed():
+    material = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+    opening = make_opening_shape("rectangle", 10, 8)
+
+    holes = generate_random_holes(
+        material,
+        opening,
+        target_open_area_percentage=20,
+        min_width_mm=10,
+        max_width_mm=10,
+        min_height_mm=8,
+        max_height_mm=8,
+        min_horizontal_gap_mm=1,
+        max_horizontal_gap_mm=5,
+        min_vertical_gap_mm=3,
+        max_vertical_gap_mm=3,
+        margin_mm=2,
+        seed=456,
+    )
+
+    placed = [translate(shape, xoff=x, yoff=y) for x, y, shape in holes]
+    rows: dict[float, list[Polygon]] = {}
+    for shape in placed:
+        rows.setdefault(round(shape.centroid.y, 6), []).append(shape)
+    row_centers = sorted(rows)
+    assert len(row_centers) > 2
+    assert all(
+        second - first == pytest.approx(11)
+        for first, second in zip(row_centers, row_centers[1:])
+    )
+    horizontal_gaps = []
+    for row in rows.values():
+        row.sort(key=lambda shape: shape.bounds[0])
+        horizontal_gaps.extend(
+            first.distance(second) for first, second in zip(row, row[1:])
+        )
+    assert len(set(round(gap, 6) for gap in horizontal_gaps)) > 1
+    assert all(1 <= gap <= 5 for gap in horizontal_gaps)
+
+
+def test_random_vertical_gap_keeps_horizontal_spacing_fixed():
+    material = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+    opening = make_opening_shape("rectangle", 10, 8)
+
+    holes = generate_random_holes(
+        material,
+        opening,
+        target_open_area_percentage=20,
+        min_width_mm=10,
+        max_width_mm=10,
+        min_height_mm=8,
+        max_height_mm=8,
+        min_horizontal_gap_mm=3,
+        max_horizontal_gap_mm=3,
+        min_vertical_gap_mm=1,
+        max_vertical_gap_mm=5,
+        margin_mm=2,
+        seed=456,
+    )
+
+    placed = [translate(shape, xoff=x, yoff=y) for x, y, shape in holes]
+    rows: dict[float, list[Polygon]] = {}
+    for shape in placed:
+        rows.setdefault(round(shape.centroid.y, 6), []).append(shape)
+    row_centers = sorted(rows)
+    assert len(row_centers) > 2
+    vertical_gaps = [
+        second - first - 8
+        for first, second in zip(row_centers, row_centers[1:])
+    ]
+    assert len(set(round(gap, 6) for gap in vertical_gaps)) > 1
+    assert all(1 <= gap <= 5 for gap in vertical_gaps)
+    for row in rows.values():
+        row.sort(key=lambda shape: shape.bounds[0])
+        assert all(
+            first.distance(second) == pytest.approx(3)
+            for first, second in zip(row, row[1:])
+        )
+
+
+def test_random_holes_cover_full_height_of_u_shaped_material():
+    material = Polygon(
+        [
+            (0, 0),
+            (100, 0),
+            (100, 100),
+            (80, 100),
+            (80, 20),
+            (20, 20),
+            (20, 100),
+            (0, 100),
+        ]
+    )
+    opening = make_opening_shape("square", 4)
+
+    holes = generate_random_holes(
+        material,
+        opening,
+        target_open_area_percentage=15,
+        min_width_mm=4,
+        max_width_mm=4,
+        min_height_mm=4,
+        max_height_mm=4,
+        min_horizontal_gap_mm=2,
+        max_horizontal_gap_mm=2,
+        min_vertical_gap_mm=2,
+        max_vertical_gap_mm=2,
+        margin_mm=2,
+        seed=789,
+    )
+
+    placed = [translate(shape, xoff=x, yoff=y) for x, y, shape in holes]
+    assert min(shape.centroid.y for shape in placed) < 10
+    assert max(shape.centroid.y for shape in placed) > 90
+    assert any(shape.centroid.x < 20 for shape in placed if shape.centroid.y > 80)
+    assert any(shape.centroid.x > 80 for shape in placed if shape.centroid.y > 80)
+
+
+def test_random_hole_generation_reports_progress_and_can_be_cancelled():
+    plate = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+    progress: list[int] = []
+
+    holes = generate_random_holes(
+        plate,
+        make_opening_shape("circle", 4),
+        target_open_area_percentage=5,
+        min_width_mm=4,
+        max_width_mm=4,
+        min_height_mm=4,
+        max_height_mm=4,
+        min_horizontal_gap_mm=1,
+        max_horizontal_gap_mm=1,
+        min_vertical_gap_mm=1,
+        max_vertical_gap_mm=1,
+        margin_mm=2,
+        seed=3,
+        progress_callback=progress.append,
+    )
+
+    assert holes
+    assert progress[0] == 0
+    assert progress[-1] == 100
+    with pytest.raises(InterruptedError, match="anulowane"):
+        generate_random_holes(
+            plate,
+            make_opening_shape("circle", 4),
+            target_open_area_percentage=5,
+            min_width_mm=4,
+            max_width_mm=4,
+            min_height_mm=4,
+            max_height_mm=4,
+            min_horizontal_gap_mm=1,
+            max_horizontal_gap_mm=1,
+            min_vertical_gap_mm=1,
+            max_vertical_gap_mm=1,
+            margin_mm=2,
+            cancellation_requested=lambda: True,
         )
 
 
