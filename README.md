@@ -215,3 +215,9 @@ zmienia sposób organizacji otworów w DXF, nie ich geometrię.
   podziałkę/odstęp albo zmniejsz otwór.
 - **Błąd biblioteki Qt w Linux** — doinstaluj brakujące systemowe biblioteki
   Qt wskazane w komunikacie systemu.
+
+## Poprawki
+
+- [ ] Eksportowanie obok dxf również pliku z konfiguracją danej perforacji. Stworzyć mozliwosc ładowania tych ustawien z tego pliku.
+- [ ] Dla pliku build_exe.bat czy jest mozliwosc skopiowania utworzonego pliku exe do katalogu google G:\Mój dysk\!!Projekty\Perforacja-DXF\"katalog  nazwa pliku\nawa pliku.exe" i Z:\BACKUPS\INSTALKI\"katalog  nazwa pliku\nawa pliku.exe". Do katalogu z nazwa pliku?. Oczywiscie jak dany komputer ma dostep. Jak nie to zeby była informacja ze nie skopiowało go.
+- [ ] 
