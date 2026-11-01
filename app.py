@@ -1262,7 +1262,43 @@ class MainWindow(QMainWindow):
         if is_random:
             target = self.target_open_area_input.value()
             messages.append(f"Cel prześwitu: {target:.1f}%")
-            if abs(open_area - target) > 0.5:
+            opening_min_x, opening_min_y, opening_max_x, opening_max_y = (
+                opening_shape.bounds
+            )
+            maximum_width = (
+                self.random_max_width_input.value()
+                if self.randomize_width_input.isChecked()
+                else opening_max_x - opening_min_x
+            )
+            maximum_height = (
+                self.random_max_height_input.value()
+                if self.randomize_height_input.isChecked()
+                else opening_max_y - opening_min_y
+            )
+            if self.opening_type_input.currentData() == "circle":
+                maximum_height = maximum_width
+            minimum_horizontal_gap = (
+                self.random_min_horizontal_gap_input.value()
+                if self.randomize_horizontal_gap_input.isChecked()
+                else self.spacing_input.value()
+            )
+            minimum_vertical_gap = (
+                self.random_min_vertical_gap_input.value()
+                if self.randomize_vertical_gap_input.isChecked()
+                else self.spacing_input.value()
+            )
+            maximum_possible = (
+                maximum_width
+                / (maximum_width + minimum_horizontal_gap)
+                * maximum_height
+                / (maximum_height + minimum_vertical_gap)
+                * 100
+            )
+            if target > maximum_possible + 0.5:
+                messages.append(
+                    f"Cel poza szacowanym limitem: około {maximum_possible:.1f}%."
+                )
+            elif abs(open_area - target) > 0.5:
                 messages.append(
                     "Nie osiągnięto celu; zmień zakres rozmiaru lub odstęp."
                 )

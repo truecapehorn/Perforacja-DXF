@@ -146,6 +146,8 @@ Wymiary kształtów i odstępy podaje się w milimetrach.
   prześwitu. Można ustawić docelowy stopień prześwitu,
   wybrać niezależnie losowanie szerokości, wysokości oraz odstępu poziomego
   i pionowego, podając zakres min–max każdego losowanego parametru.
+  Losowane wymiary i odstępy są dobierane z uwzględnieniem celu prześwitu;
+  otwory są rozmieszczane osobno w dostępnych odcinkach każdego rzędu.
   Niezaznaczone wymiary są stałe i wynikają z ustawionego kształtu otworu;
   niezaznaczony odstęp korzysta z parametru odstępu z trybu siatki. Układ jest
   przeliczany wyłącznie po kliknięciu
@@ -154,7 +156,9 @@ Wymiary kształtów i odstępy podaje się w milimetrach.
   miejscu lub dużym odstępie osiągnięty prześwit może różnić się od celu;
   jeśli zakres wymiaru na to pozwala, program dopasowuje rozmiar ostatniego
   otworu do celu bez przekraczania zakresu i naruszania odstępów. Pasek statusu
-  pokazuje wynik i informuje o niedopasowaniu.
+  pokazuje wynik i informuje o niedopasowaniu. Cel może być nieosiągalny przy
+  wybranych wymiarach i odstępach; program pokazuje wtedy szacowany limit
+  wynikający z tych parametrów.
 - **Tryb odległości — odstęp między krawędziami** oznacza minimalną
   szczelinę pomiędzy obrysami sąsiednich otworów. Program dobiera podziałkę
   na podstawie rzeczywistego kształtu i sprawdza, czy otwory nie zachodzą

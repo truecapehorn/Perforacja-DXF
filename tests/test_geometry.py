@@ -3,7 +3,7 @@ import math
 import ezdxf
 import pytest
 from shapely.affinity import translate
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import MultiPolygon, Point, Polygon
 
 from geometry import (
     export_dxf,
@@ -402,6 +402,46 @@ def test_random_holes_cover_full_height_of_u_shaped_material():
     assert max(shape.centroid.y for shape in placed) > 90
     assert any(shape.centroid.x < 20 for shape in placed if shape.centroid.y > 80)
     assert any(shape.centroid.x > 80 for shape in placed if shape.centroid.y > 80)
+
+
+def test_target_directed_random_parameters_approach_highest_feasible_open_area():
+    material = Polygon(
+        [
+            (0, 0),
+            (1620, 0),
+            (1620, 1320),
+            (1400, 1320),
+            (1400, 570),
+            (220, 570),
+            (220, 1320),
+            (0, 1320),
+        ],
+        holes=[
+            list(Point(810, 390).buffer(100).exterior.coords),
+            list(Point(100, 100).buffer(25).exterior.coords),
+        ],
+    )
+
+    holes = generate_random_holes(
+        material,
+        make_opening_shape("rectangle", 10, 10),
+        target_open_area_percentage=60,
+        min_width_mm=10,
+        max_width_mm=300,
+        min_height_mm=10,
+        max_height_mm=10,
+        min_horizontal_gap_mm=10,
+        max_horizontal_gap_mm=80,
+        min_vertical_gap_mm=10,
+        max_vertical_gap_mm=10,
+        margin_mm=10,
+        inner_margin_mm=10,
+        seed=20261101,
+    )
+
+    open_area = sum(shape.area for _, _, shape in holes) / material.area * 100
+    assert open_area > 40
+    assert open_area < 50
 
 
 def test_random_holes_adjust_variable_final_size_to_reach_open_area_target():

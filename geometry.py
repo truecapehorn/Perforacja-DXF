@@ -359,44 +359,224 @@ def generate_random_holes(
     prepared = prep(allowed)
     generator = random.Random(seed)
     area_target = material.area * target_open_area_percentage / 100
+
+    def axis_density(
+        factor: float,
+        min_size: float,
+        max_size: float,
+        min_gap: float,
+        max_gap: float,
+    ) -> float:
+        size = min_size + (max_size - min_size) * factor
+        gap = max_gap - (max_gap - min_gap) * factor
+        return size / (size + gap)
+
+    def factor_for_density(
+        density: float,
+        min_size: float,
+        max_size: float,
+        min_gap: float,
+        max_gap: float,
+    ) -> float:
+        if density <= axis_density(0.0, min_size, max_size, min_gap, max_gap):
+            return 0.0
+        if density >= axis_density(1.0, min_size, max_size, min_gap, max_gap):
+            return 1.0
+        low, high = 0.0, 1.0
+        for _ in range(32):
+            middle = (low + high) / 2
+            if axis_density(
+                middle, min_size, max_size, min_gap, max_gap
+            ) < density:
+                low = middle
+            else:
+                high = middle
+        return (low + high) / 2
+
+    def sample_axis(
+        min_size: float,
+        max_size: float,
+        min_gap: float,
+        max_gap: float,
+        target_factor: float,
+    ) -> tuple[float, float]:
+        concentration = 40.0
+        factor = generator.betavariate(
+            1 + target_factor * concentration,
+            1 + (1 - target_factor) * concentration,
+        )
+        return (
+            min_size + (max_size - min_size) * factor,
+            max_gap - (max_gap - min_gap) * factor,
+        )
+
+    target_fraction = target_open_area_percentage / 100
+    max_horizontal_density = axis_density(
+        1.0,
+        min_width_mm,
+        max_width_mm,
+        min_horizontal_gap_mm,
+        max_horizontal_gap_mm,
+    )
+    max_vertical_density = axis_density(
+        1.0,
+        min_height_mm,
+        max_height_mm,
+        min_vertical_gap_mm,
+        max_vertical_gap_mm,
+    )
+    target_vertical_density = min(
+        max_vertical_density,
+        target_fraction / max_horizontal_density,
+    )
+    vertical_factor = factor_for_density(
+        target_vertical_density,
+        min_height_mm,
+        max_height_mm,
+        min_vertical_gap_mm,
+        max_vertical_gap_mm,
+    )
+    estimated_vertical_density = axis_density(
+        vertical_factor,
+        min_height_mm,
+        max_height_mm,
+        min_vertical_gap_mm,
+        max_vertical_gap_mm,
+    )
+    target_horizontal_density = min(
+        max_horizontal_density,
+        target_fraction / estimated_vertical_density,
+    )
+    horizontal_factor = factor_for_density(
+        target_horizontal_density,
+        min_width_mm,
+        max_width_mm,
+        min_horizontal_gap_mm,
+        max_horizontal_gap_mm,
+    )
+
     if progress_callback is not None:
         progress_callback(0)
 
     allowed_min_x, allowed_min_y, allowed_max_x, allowed_max_y = allowed.bounds
     row_bottom = allowed_min_y
     attempts = 0
+    expected_height = min_height_mm + (
+        max_height_mm - min_height_mm
+    ) * vertical_factor
+    expected_width = min_width_mm + (
+        max_width_mm - min_width_mm
+    ) * horizontal_factor
+    nominal_shape = rotate(
+        scale(
+            opening_shape,
+            xfact=expected_width / base_width,
+            yfact=expected_height / base_height,
+            origin=(0, 0),
+        ),
+        angle_degrees,
+        origin=(0, 0),
+    )
+    nominal_row_height = nominal_shape.bounds[3] - nominal_shape.bounds[1]
     while row_bottom < allowed_max_y and attempts < MAX_RANDOM_CANDIDATES:
         if cancellation_requested is not None and cancellation_requested():
             raise InterruptedError("Losowanie zostało anulowane.")
         row_shapes: list[tuple[BaseGeometry, BaseGeometry, float, float]] = []
-        cursor_x = allowed_min_x
         row_height = 0.0
-        while cursor_x < allowed_max_x and attempts < MAX_RANDOM_CANDIDATES:
-            if cancellation_requested is not None and cancellation_requested():
-                raise InterruptedError("Losowanie zostało anulowane.")
-            attempts += 1
-            width_mm = generator.uniform(min_width_mm, max_width_mm)
-            height_mm = generator.uniform(min_height_mm, max_height_mm)
-            hole_shape = scale(
-                opening_shape,
-                xfact=width_mm / base_width,
-                yfact=height_mm / base_height,
-                origin=(0, 0),
-            )
-            oriented_shape = rotate(hole_shape, angle_degrees, origin=(0, 0))
-            shape_bounds = oriented_shape.bounds
-            shape_width = shape_bounds[2] - shape_bounds[0]
-            shape_height = shape_bounds[3] - shape_bounds[1]
-            if cursor_x + shape_width > allowed_max_x:
-                break
-            row_shapes.append((hole_shape, oriented_shape, cursor_x, shape_width))
-            row_height = max(row_height, shape_height)
-            horizontal_gap = generator.uniform(
-                min_horizontal_gap_mm, max_horizontal_gap_mm
-            )
-            cursor_x += shape_width + horizontal_gap
+        scan_y = row_bottom + nominal_row_height / 2
+        scanline = LineString(
+            [(allowed_min_x, scan_y), (allowed_max_x, scan_y)]
+        )
+        intersections = allowed.intersection(scanline)
+        line_parts = (
+            intersections.geoms
+            if hasattr(intersections, "geoms")
+            else (intersections,)
+        )
+        intervals = sorted(
+            (part.bounds[0], part.bounds[2])
+            for part in line_parts
+            if part.geom_type == "LineString" and part.length > 1e-8
+        )
+        for interval_min_x, interval_max_x in intervals:
+            cursor_x = interval_min_x
+            while (
+                cursor_x < interval_max_x
+                and attempts < MAX_RANDOM_CANDIDATES
+            ):
+                if (
+                    cancellation_requested is not None
+                    and cancellation_requested()
+                ):
+                    raise InterruptedError("Losowanie zostało anulowane.")
+                attempts += 1
+                local_max_width = min(
+                    max_width_mm,
+                    interval_max_x - cursor_x,
+                )
+                if local_max_width < min_width_mm:
+                    break
+                local_horizontal_factor = factor_for_density(
+                    target_horizontal_density,
+                    min_width_mm,
+                    local_max_width,
+                    min_horizontal_gap_mm,
+                    max_horizontal_gap_mm,
+                )
+                width_mm, horizontal_gap = sample_axis(
+                    min_width_mm,
+                    local_max_width,
+                    min_horizontal_gap_mm,
+                    max_horizontal_gap_mm,
+                    local_horizontal_factor,
+                )
+                height_sample = generator.betavariate(
+                    1 + vertical_factor * 40,
+                    1 + (1 - vertical_factor) * 40,
+                )
+                height_mm = min_height_mm + (
+                    max_height_mm - min_height_mm
+                ) * height_sample
+                hole_shape = scale(
+                    opening_shape,
+                    xfact=width_mm / base_width,
+                    yfact=height_mm / base_height,
+                    origin=(0, 0),
+                )
+                oriented_shape = rotate(
+                    hole_shape, angle_degrees, origin=(0, 0)
+                )
+                shape_bounds = oriented_shape.bounds
+                shape_width = shape_bounds[2] - shape_bounds[0]
+                shape_height = shape_bounds[3] - shape_bounds[1]
+                if cursor_x + shape_width > interval_max_x:
+                    fitted_width = width_mm * (
+                        (interval_max_x - cursor_x) / shape_width
+                    )
+                    if fitted_width < min_width_mm:
+                        break
+                    width_mm = fitted_width
+                    hole_shape = scale(
+                        opening_shape,
+                        xfact=width_mm / base_width,
+                        yfact=height_mm / base_height,
+                        origin=(0, 0),
+                    )
+                    oriented_shape = rotate(
+                        hole_shape, angle_degrees, origin=(0, 0)
+                    )
+                    shape_bounds = oriented_shape.bounds
+                    shape_width = shape_bounds[2] - shape_bounds[0]
+                    shape_height = shape_bounds[3] - shape_bounds[1]
+                row_shapes.append(
+                    (hole_shape, oriented_shape, cursor_x, shape_width)
+                )
+                row_height = max(row_height, shape_height)
+                cursor_x += shape_width + horizontal_gap
 
-        if not row_shapes or row_height <= 0:
+        if row_height <= 0:
+            row_height = nominal_row_height
+        if row_height <= 0:
             break
         placed_row: list[tuple[float, float, BaseGeometry]] = []
         for hole_shape, oriented_shape, cursor_x, _shape_width in row_shapes:
@@ -409,8 +589,12 @@ def generate_random_holes(
             placed_row.append((x, y, hole_shape))
         if placed_row:
             rows.append(placed_row)
-        vertical_gap = generator.uniform(
-            min_vertical_gap_mm, max_vertical_gap_mm
+        _row_height_sample, vertical_gap = sample_axis(
+            min_height_mm,
+            max_height_mm,
+            min_vertical_gap_mm,
+            max_vertical_gap_mm,
+            vertical_factor,
         )
         row_bottom += row_height + vertical_gap
         if progress_callback is not None:
