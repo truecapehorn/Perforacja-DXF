@@ -235,6 +235,64 @@ def test_random_holes_can_vary_rectangle_width_height_and_spacing():
     )
 
 
+def test_random_hole_width_span_is_balanced_across_the_selected_range():
+    material = Polygon([(0, 0), (500, 0), (500, 500), (0, 500)])
+    opening = make_opening_shape("rectangle", 30, 10)
+
+    holes = generate_random_holes(
+        material,
+        opening,
+        min_width_mm=5,
+        max_width_mm=100,
+        min_height_mm=10,
+        max_height_mm=10,
+        min_horizontal_gap_mm=3,
+        max_horizontal_gap_mm=3,
+        min_vertical_gap_mm=3,
+        max_vertical_gap_mm=3,
+        margin_mm=5,
+        seed=123,
+    )
+
+    bucket_width_totals = [0.0] * 10
+    for _, _, shape in holes:
+        width = shape.bounds[2] - shape.bounds[0]
+        bucket = min(9, int((width - 5) / 9.5))
+        bucket_width_totals[bucket] += width
+
+    assert len(holes) > 100
+    assert max(bucket_width_totals) - min(bucket_width_totals) < 100
+
+
+def test_random_rows_fill_space_with_smaller_holes_before_stopping():
+    material = Polygon([(0, 0), (500, 0), (500, 100), (0, 100)])
+
+    holes = generate_random_holes(
+        material,
+        make_opening_shape("rectangle", 10, 10),
+        min_width_mm=10,
+        max_width_mm=200,
+        min_height_mm=10,
+        max_height_mm=10,
+        min_horizontal_gap_mm=10,
+        max_horizontal_gap_mm=10,
+        min_vertical_gap_mm=10,
+        max_vertical_gap_mm=10,
+        margin_mm=5,
+        seed=456,
+    )
+
+    placed = [translate(shape, xoff=x, yoff=y) for x, y, shape in holes]
+    rows: dict[float, list[Polygon]] = {}
+    for shape in placed:
+        rows.setdefault(round(shape.centroid.y, 6), []).append(shape)
+    assert len(rows) > 1
+    for row in rows.values():
+        row.sort(key=lambda shape: shape.bounds[0])
+        assert row[0].bounds[0] - 5 <= 20 + 1e-6
+        assert 0 <= 495 - row[-1].bounds[2] <= 20
+
+
 def test_random_slot_is_rebuilt_as_a_capsule_instead_of_stretched_oval():
     material = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
     opening = make_opening_shape("slot", 10, 10)
@@ -455,7 +513,7 @@ def test_random_holes_cover_available_segments_without_target_control():
 
     widths = [shape.bounds[2] - shape.bounds[0] for _, _, shape in holes]
     assert len(holes) > 100
-    assert 80 < sum(widths) / len(widths) < 130
+    assert 50 < sum(widths) / len(widths) < 80
     assert max(widths) <= 200
     placed = [translate(shape, xoff=x, yoff=y) for x, y, shape in holes]
     assert any(

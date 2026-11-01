@@ -356,6 +356,8 @@ def generate_random_holes(
     prepared = prep(allowed)
     generator = random.Random(seed)
     placed: list[tuple[float, float, BaseGeometry]] = []
+    width_bucket_count = 10
+    placed_width_mm_by_bucket = [0.0] * width_bucket_count
     if progress_callback is not None:
         progress_callback(0)
 
@@ -376,6 +378,17 @@ def generate_random_holes(
     )
     nominal_shape = rotate(nominal_shape, angle_degrees, origin=(0, 0))
     nominal_row_height = nominal_shape.bounds[3] - nominal_shape.bounds[1]
+
+    def make_random_shape(width_mm: float, height_mm: float) -> BaseGeometry:
+        if opening_shape_factory is not None:
+            return opening_shape_factory(width_mm, height_mm)
+        return scale(
+            opening_shape,
+            xfact=width_mm / base_width,
+            yfact=height_mm / base_height,
+            origin=(0, 0),
+        )
+
     while (
         row_bottom < allowed_max_y
         and attempts < MAX_RANDOM_CANDIDATES
@@ -412,36 +425,160 @@ def generate_random_holes(
                 ):
                     raise InterruptedError("Losowanie zostało anulowane.")
                 attempts += 1
-                width_mm = generator.uniform(min_width_mm, max_width_mm)
+                least_populated_bucket = min(placed_width_mm_by_bucket)
+                available_buckets = [
+                    index
+                    for index, total_width in enumerate(placed_width_mm_by_bucket)
+                    if total_width == least_populated_bucket
+                ]
+                width_bucket = generator.choice(available_buckets)
+                bucket_width = (max_width_mm - min_width_mm) / width_bucket_count
+                width_mm = generator.uniform(
+                    min_width_mm + width_bucket * bucket_width,
+                    min(
+                        max_width_mm,
+                        min_width_mm + (width_bucket + 1) * bucket_width,
+                    ),
+                )
                 height_mm = generator.uniform(min_height_mm, max_height_mm)
                 horizontal_gap = generator.uniform(
                     min_horizontal_gap_mm, max_horizontal_gap_mm
                 )
-                hole_shape = (
-                    opening_shape_factory(width_mm, height_mm)
-                    if opening_shape_factory is not None
-                    else scale(
-                        opening_shape,
-                        xfact=width_mm / base_width,
-                        yfact=height_mm / base_height,
-                        origin=(0, 0),
-                    )
-                )
-                oriented_shape = rotate(
-                    hole_shape, angle_degrees, origin=(0, 0)
-                )
+                hole_shape = make_random_shape(width_mm, height_mm)
+                oriented_shape = rotate(hole_shape, angle_degrees, origin=(0, 0))
                 shape_bounds = oriented_shape.bounds
                 shape_width = shape_bounds[2] - shape_bounds[0]
                 shape_height = shape_bounds[3] - shape_bounds[1]
                 if cursor_x + shape_width > interval_max_x:
-                    break
+                    minimum_shape = make_random_shape(min_width_mm, height_mm)
+                    minimum_oriented_shape = rotate(
+                        minimum_shape, angle_degrees, origin=(0, 0)
+                    )
+                    minimum_shape_bounds = minimum_oriented_shape.bounds
+                    if (
+                        cursor_x
+                        + minimum_shape_bounds[2]
+                        - minimum_shape_bounds[0]
+                        > interval_max_x
+                    ):
+                        break
+                    lower_width = min_width_mm
+                    upper_width = width_mm
+                    for _ in range(16):
+                        candidate_width = (lower_width + upper_width) / 2
+                        candidate_shape = make_random_shape(
+                            candidate_width, height_mm
+                        )
+                        candidate_bounds = rotate(
+                            candidate_shape,
+                            angle_degrees,
+                            origin=(0, 0),
+                        ).bounds
+                        if (
+                            cursor_x + candidate_bounds[2] - candidate_bounds[0]
+                            <= interval_max_x
+                        ):
+                            lower_width = candidate_width
+                        else:
+                            upper_width = candidate_width
+                    width_mm = lower_width
+                    hole_shape = make_random_shape(width_mm, height_mm)
+                    oriented_shape = rotate(
+                        hole_shape, angle_degrees, origin=(0, 0)
+                    )
+                    shape_bounds = oriented_shape.bounds
+                    shape_width = shape_bounds[2] - shape_bounds[0]
+                    shape_height = shape_bounds[3] - shape_bounds[1]
+                    width_bucket = min(
+                        width_bucket_count - 1,
+                        int(
+                            (width_mm - min_width_mm)
+                            / max(max_width_mm - min_width_mm, 1e-12)
+                            * width_bucket_count
+                        ),
+                    )
                 x = cursor_x - shape_bounds[0]
                 y = row_bottom - shape_bounds[1]
                 translated = translate(oriented_shape, xoff=x, yoff=y)
                 if prepared.covers(translated):
                     placed.append((x, y, hole_shape))
+                    placed_width_mm_by_bucket[width_bucket] += width_mm
                     row_height = max(row_height, shape_height)
-                cursor_x += shape_width + horizontal_gap
+                    cursor_x += shape_width + horizontal_gap
+                else:
+                    minimum_shape = make_random_shape(
+                        min_width_mm, height_mm
+                    )
+                    minimum_oriented_shape = rotate(
+                        minimum_shape, angle_degrees, origin=(0, 0)
+                    )
+                    minimum_shape_bounds = minimum_oriented_shape.bounds
+                    minimum_x = cursor_x - minimum_shape_bounds[0]
+                    minimum_y = row_bottom - minimum_shape_bounds[1]
+                    minimum_translated = translate(
+                        minimum_oriented_shape,
+                        xoff=minimum_x,
+                        yoff=minimum_y,
+                    )
+                    if prepared.covers(minimum_translated):
+                        lower_width = min_width_mm
+                        upper_width = width_mm
+                        best_width = min_width_mm
+                        best_shape = minimum_shape
+                        best_bounds = minimum_shape_bounds
+                        best_x = minimum_x
+                        best_y = minimum_y
+                        for _ in range(16):
+                            candidate_width = (lower_width + upper_width) / 2
+                            candidate_shape = make_random_shape(
+                                candidate_width, height_mm
+                            )
+                            candidate_oriented_shape = rotate(
+                                candidate_shape,
+                                angle_degrees,
+                                origin=(0, 0),
+                            )
+                            candidate_bounds = candidate_oriented_shape.bounds
+                            candidate_x = cursor_x - candidate_bounds[0]
+                            candidate_y = row_bottom - candidate_bounds[1]
+                            candidate_translated = translate(
+                                candidate_oriented_shape,
+                                xoff=candidate_x,
+                                yoff=candidate_y,
+                            )
+                            if prepared.covers(candidate_translated):
+                                lower_width = candidate_width
+                                best_width = candidate_width
+                                best_shape = candidate_shape
+                                best_bounds = candidate_bounds
+                                best_x = candidate_x
+                                best_y = candidate_y
+                            else:
+                                upper_width = candidate_width
+                        placed.append((best_x, best_y, best_shape))
+                        width_bucket = min(
+                            width_bucket_count - 1,
+                            int(
+                                (best_width - min_width_mm)
+                                / max(max_width_mm - min_width_mm, 1e-12)
+                                * width_bucket_count
+                            ),
+                        )
+                        placed_width_mm_by_bucket[width_bucket] += best_width
+                        row_height = max(
+                            row_height, best_bounds[3] - best_bounds[1]
+                        )
+                        cursor_x += (
+                            best_bounds[2]
+                            - best_bounds[0]
+                            + horizontal_gap
+                        )
+                    else:
+                        cursor_x += (
+                            minimum_shape_bounds[2]
+                            - minimum_shape_bounds[0]
+                            + min_horizontal_gap_mm
+                        )
 
         if row_height <= 0:
             row_height = nominal_row_height
