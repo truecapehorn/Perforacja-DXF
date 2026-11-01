@@ -235,14 +235,3 @@ zmienia sposób organizacji otworów w DXF, nie ich geometrię.
   podziałkę/odstęp albo zmniejsz otwór.
 - **Błąd biblioteki Qt w Linux** — doinstaluj brakujące systemowe biblioteki
   Qt wskazane w komunikacie systemu.
-
-## Poprawki
-
-- #### ver 6
- - [x] Eksportowanie obok dxf również pliku z konfiguracją danej perforacji. Stworzyć mozliwosc ładowania tych ustawien z tego pliku.
- - [x] Dla pliku build_exe.bat czy jest mozliwosc skopiowania utworzonego pliku exe do katalogu google G:\Mój dysk!!Projekty\Perforacja-DXF"katalog nazwa pliku\nawa pliku.exe" i Z:\BACKUPS\INSTALKI"katalog nazwa pliku\nawa pliku.exe". Do katalogu z nazwa pliku?. Oczywiscie jak dany komputer ma dostep. Jak nie to zeby była informacja ze nie skopiowało go.
-
-- #### ver 7
-- [x] Dla układu losowego nowa perforacja powstaje po kliknięciu **Losuj losowy układ**.
-- [x] Można niezależnie wybrać losowanie szerokości, wysokości i odstępu oraz zakresy min–max; niezaznaczone parametry pozostają stałe.
-- [x] Losowanie działa w tle i pokazuje postęp z możliwością anulowania.
