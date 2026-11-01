@@ -142,24 +142,15 @@ Wymiary kształtów i odstępy podaje się w milimetrach.
 - **Układ mijankowy** przesuwa co drugi rząd o połowę podziałki.
 - **Układ losowy** rozmieszcza otwory w losowych miejscach, bez nakładania i
   z zachowaniem marginesów. Rozkłada perforację na całej dostępnej wysokości
-  detalu zamiast kończyć układanie w dolnej części po osiągnięciu celu
-  prześwitu. Można ustawić docelowy stopień prześwitu,
-  wybrać niezależnie losowanie szerokości, wysokości oraz odstępu poziomego
-  i pionowego, podając zakres min–max każdego losowanego parametru.
-  Losowane wymiary i odstępy są dobierane z uwzględnieniem celu prześwitu,
-  z równoważeniem udziału obu osi zamiast ciągłego wybierania maksymalnego
-  wymiaru. Otwory są rozmieszczane osobno w dostępnych odcinkach każdego rzędu.
-  Niezaznaczone wymiary są stałe i wynikają z ustawionego kształtu otworu;
-  niezaznaczony odstęp korzysta z parametru odstępu z trybu siatki. Układ jest
-  przeliczany wyłącznie po kliknięciu
-  **Losuj losowy układ**. Podczas obliczeń działa okno postępu z możliwością
-  anulowania, a interfejs pozostaje responsywny. Przy ograniczonym
-  miejscu lub dużym odstępie osiągnięty prześwit może różnić się od celu;
-  jeśli zakres wymiaru na to pozwala, program dopasowuje rozmiar ostatniego
-  otworu do celu bez przekraczania zakresu i naruszania odstępów. Pasek statusu
-  pokazuje wynik i informuje o niedopasowaniu. Cel może być nieosiągalny przy
-  wybranych wymiarach i odstępach; program pokazuje wtedy szacowany limit
-  wynikający z tych parametrów.
+  detalu, także w oddzielnych fragmentach konturu. Można niezależnie włączyć
+  losowanie szerokości, wysokości oraz odstępu poziomego i pionowego, podając
+  zakres min–max każdego losowanego parametru. Wymiary i odstępy są losowane
+  niezależnie i nie są dopasowywane do docelowego prześwitu. Niezaznaczone
+  wymiary wynikają z ustawionego kształtu, a niezaznaczony odstęp korzysta
+  z parametru odstępu z trybu siatki. Układ jest przeliczany wyłącznie po
+  kliknięciu **Losuj losowy układ**. Podczas obliczeń działa okno postępu
+  z możliwością anulowania, a interfejs pozostaje responsywny. Pasek statusu
+  pokazuje uzyskany stopień prześwitu.
 - **Tryb odległości — odstęp między krawędziami** oznacza minimalną
   szczelinę pomiędzy obrysami sąsiednich otworów. Program dobiera podziałkę
   na podstawie rzeczywistego kształtu i sprawdza, czy otwory nie zachodzą

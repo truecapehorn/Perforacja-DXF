@@ -132,7 +132,6 @@ def test_random_holes_are_reproducible_sized_and_respect_clearance():
     holes = generate_random_holes(
         material,
         opening,
-        target_open_area_percentage=10,
         min_width_mm=6,
         max_width_mm=10,
         min_height_mm=4,
@@ -147,7 +146,6 @@ def test_random_holes_are_reproducible_sized_and_respect_clearance():
     repeated = generate_random_holes(
         material,
         opening,
-        target_open_area_percentage=10,
         min_width_mm=6,
         max_width_mm=10,
         min_height_mm=4,
@@ -177,13 +175,7 @@ def test_random_holes_are_reproducible_sized_and_respect_clearance():
         for index, first in enumerate(placed)
         for second in placed[index + 1 :]
     )
-    actual_percentage = (
-        sum(shape.area for _, _, shape in holes) / material.area * 100
-    )
-    largest_hole_percentage = max(
-        shape.area for _, _, shape in holes
-    ) / material.area * 100
-    assert abs(actual_percentage - 10) <= largest_hole_percentage
+    assert len(holes) > 10
 
 
 def test_random_holes_reject_invalid_size_range():
@@ -193,7 +185,6 @@ def test_random_holes_reject_invalid_size_range():
         generate_random_holes(
             plate,
             make_opening_shape("circle", 5),
-            10,
             10,
             5,
             0,
@@ -213,7 +204,6 @@ def test_random_holes_can_vary_rectangle_width_height_and_spacing():
     holes = generate_random_holes(
         material,
         opening,
-        target_open_area_percentage=12,
         min_width_mm=6,
         max_width_mm=14,
         min_height_mm=4,
@@ -252,7 +242,6 @@ def test_fixed_random_spacing_uses_even_rows_and_constant_horizontal_gap():
     holes = generate_random_holes(
         material,
         opening,
-        target_open_area_percentage=12,
         min_width_mm=6,
         max_width_mm=14,
         min_height_mm=8,
@@ -293,7 +282,6 @@ def test_random_horizontal_gap_keeps_vertical_spacing_fixed():
     holes = generate_random_holes(
         material,
         opening,
-        target_open_area_percentage=20,
         min_width_mm=10,
         max_width_mm=10,
         min_height_mm=8,
@@ -333,7 +321,6 @@ def test_random_vertical_gap_keeps_horizontal_spacing_fixed():
     holes = generate_random_holes(
         material,
         opening,
-        target_open_area_percentage=20,
         min_width_mm=10,
         max_width_mm=10,
         min_height_mm=8,
@@ -384,7 +371,6 @@ def test_random_holes_cover_full_height_of_u_shaped_material():
     holes = generate_random_holes(
         material,
         opening,
-        target_open_area_percentage=15,
         min_width_mm=4,
         max_width_mm=4,
         min_height_mm=4,
@@ -404,7 +390,7 @@ def test_random_holes_cover_full_height_of_u_shaped_material():
     assert any(shape.centroid.x > 80 for shape in placed if shape.centroid.y > 80)
 
 
-def test_target_directed_random_parameters_approach_highest_feasible_open_area():
+def test_random_holes_cover_available_segments_without_target_control():
     material = Polygon(
         [
             (0, 0),
@@ -425,74 +411,6 @@ def test_target_directed_random_parameters_approach_highest_feasible_open_area()
     holes = generate_random_holes(
         material,
         make_opening_shape("rectangle", 10, 10),
-        target_open_area_percentage=60,
-        min_width_mm=10,
-        max_width_mm=300,
-        min_height_mm=10,
-        max_height_mm=10,
-        min_horizontal_gap_mm=10,
-        max_horizontal_gap_mm=80,
-        min_vertical_gap_mm=10,
-        max_vertical_gap_mm=10,
-        margin_mm=10,
-        inner_margin_mm=10,
-        seed=20261101,
-    )
-
-    open_area = sum(shape.area for _, _, shape in holes) / material.area * 100
-    assert open_area > 40
-    assert open_area < 50
-
-
-def test_target_directed_sampling_does_not_force_maximum_width_when_spacing_varies():
-    material = Polygon([(0, 0), (300, 0), (300, 300), (0, 300)])
-
-    holes = generate_random_holes(
-        material,
-        make_opening_shape("rectangle", 10, 10),
-        target_open_area_percentage=60,
-        min_width_mm=10,
-        max_width_mm=200,
-        min_height_mm=10,
-        max_height_mm=10,
-        min_horizontal_gap_mm=10,
-        max_horizontal_gap_mm=10,
-        min_vertical_gap_mm=2,
-        max_vertical_gap_mm=40,
-        margin_mm=2,
-        seed=20261101,
-    )
-
-    widths = [shape.bounds[2] - shape.bounds[0] for _, _, shape in holes]
-    open_area = sum(shape.area for _, _, shape in holes) / material.area * 100
-    assert len(widths) > 20
-    assert sum(widths) / len(widths) < 100
-    assert max(widths) < 150
-    assert open_area > 45
-
-
-def test_target_directed_sampling_stays_below_width_max_on_u_shaped_part():
-    material = Polygon(
-        [
-            (0, 0),
-            (1620, 0),
-            (1620, 1320),
-            (1400, 1320),
-            (1400, 570),
-            (220, 570),
-            (220, 1320),
-            (0, 1320),
-        ],
-        holes=[
-            list(Point(810, 390).buffer(100).exterior.coords),
-            list(Point(100, 100).buffer(25).exterior.coords),
-        ],
-    )
-
-    holes = generate_random_holes(
-        material,
-        make_opening_shape("rectangle", 10, 10),
-        target_open_area_percentage=60,
         min_width_mm=10,
         max_width_mm=200,
         min_height_mm=10,
@@ -507,38 +425,19 @@ def test_target_directed_sampling_stays_below_width_max_on_u_shaped_part():
     )
 
     widths = [shape.bounds[2] - shape.bounds[0] for _, _, shape in holes]
-    open_area = sum(shape.area for _, _, shape in holes) / material.area * 100
-    assert sum(widths) / len(widths) < 80
-    assert max(widths) < 130
-    assert open_area > 54
-
-
-def test_random_holes_adjust_variable_final_size_to_reach_open_area_target():
-    material = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
-
-    holes = generate_random_holes(
-        material,
-        make_opening_shape("rectangle", 10, 8),
-        target_open_area_percentage=13.37,
-        min_width_mm=6,
-        max_width_mm=14,
-        min_height_mm=8,
-        max_height_mm=8,
-        min_horizontal_gap_mm=1,
-        max_horizontal_gap_mm=3,
-        min_vertical_gap_mm=1,
-        max_vertical_gap_mm=3,
-        margin_mm=2,
-        seed=456,
+    assert len(holes) > 100
+    assert 80 < sum(widths) / len(widths) < 130
+    assert max(widths) <= 200
+    placed = [translate(shape, xoff=x, yoff=y) for x, y, shape in holes]
+    assert any(
+        shape.centroid.x < 220
+        for shape in placed
+        if shape.centroid.y > 1000
     )
-
-    actual_percentage = (
-        sum(shape.area for _, _, shape in holes) / material.area * 100
-    )
-    assert actual_percentage == pytest.approx(13.37, abs=1e-8)
-    assert all(
-        6 <= shape.bounds[2] - shape.bounds[0] <= 14
-        for _, _, shape in holes
+    assert any(
+        shape.centroid.x > 1400
+        for shape in placed
+        if shape.centroid.y > 1000
     )
 
 
@@ -549,7 +448,6 @@ def test_random_hole_generation_reports_progress_and_can_be_cancelled():
     holes = generate_random_holes(
         plate,
         make_opening_shape("circle", 4),
-        target_open_area_percentage=5,
         min_width_mm=4,
         max_width_mm=4,
         min_height_mm=4,
@@ -570,7 +468,6 @@ def test_random_hole_generation_reports_progress_and_can_be_cancelled():
         generate_random_holes(
             plate,
             make_opening_shape("circle", 4),
-            target_open_area_percentage=5,
             min_width_mm=4,
             max_width_mm=4,
             min_height_mm=4,

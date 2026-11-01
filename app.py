@@ -510,10 +510,6 @@ class MainWindow(QMainWindow):
             "Margines od krawędzi wewnętrznej / wyspy:",
             self.inner_margin_input,
         )
-        self.target_open_area_input = _parameter_input(30.0, 0.1, 99.9, 1.0)
-        self.target_open_area_input.setSuffix(" %")
-        self.random_target_label = QLabel("Docelowy prześwit:")
-        form.addRow(self.random_target_label, self.target_open_area_input)
         def dimension_range_row(
             minimum: float,
             maximum: float,
@@ -625,7 +621,6 @@ class MainWindow(QMainWindow):
             self.opening_angle_input,
             self.margin_input,
             self.inner_margin_input,
-            self.target_open_area_input,
             self.random_min_width_input,
             self.random_max_width_input,
             self.random_min_height_input,
@@ -714,7 +709,6 @@ class MainWindow(QMainWindow):
             self.margin_input,
             self.inner_margin_input,
             self.perforation_export_input,
-            self.target_open_area_input,
             self.randomize_width_input,
             self.randomize_height_input,
             self.randomize_horizontal_gap_input,
@@ -754,9 +748,6 @@ class MainWindow(QMainWindow):
             self.opening_angle_input.setValue(settings.opening_angle_degrees)
             self.margin_input.setValue(settings.outer_margin_mm)
             self.inner_margin_input.setValue(settings.inner_margin_mm)
-            self.target_open_area_input.setValue(
-                settings.target_open_area_percentage
-            )
             self.randomize_width_input.setChecked(settings.randomize_width)
             self.randomize_height_input.setChecked(settings.randomize_height)
             self.randomize_horizontal_gap_input.setChecked(
@@ -913,7 +904,6 @@ class MainWindow(QMainWindow):
                 if self.randomize_vertical_gap_input.isChecked()
                 else self.spacing_input.value()
             )
-            target_percentage = self.target_open_area_input.value()
             margin = self.margin_input.value()
             inner_margin = self.inner_margin_input.value()
             angle = self.angle_input.value()
@@ -931,7 +921,6 @@ class MainWindow(QMainWindow):
             return generate_random_holes(
                 material,
                 opening_shape,
-                target_percentage,
                 min_width,
                 max_width,
                 min_height,
@@ -1048,8 +1037,6 @@ class MainWindow(QMainWindow):
             is_random and self.randomize_vertical_gap_input.isChecked()
         )
         for widget in (
-            self.random_target_label,
-            self.target_open_area_input,
             self.randomize_width_input,
             self.random_width_range_label,
             self.randomize_height_input,
@@ -1259,49 +1246,6 @@ class MainWindow(QMainWindow):
             f"Liczba otworów: {len(holes):,}",
             f"Stopień prześwitu: {open_area:.1f}%",
         ]
-        if is_random:
-            target = self.target_open_area_input.value()
-            messages.append(f"Cel prześwitu: {target:.1f}%")
-            opening_min_x, opening_min_y, opening_max_x, opening_max_y = (
-                opening_shape.bounds
-            )
-            maximum_width = (
-                self.random_max_width_input.value()
-                if self.randomize_width_input.isChecked()
-                else opening_max_x - opening_min_x
-            )
-            maximum_height = (
-                self.random_max_height_input.value()
-                if self.randomize_height_input.isChecked()
-                else opening_max_y - opening_min_y
-            )
-            if self.opening_type_input.currentData() == "circle":
-                maximum_height = maximum_width
-            minimum_horizontal_gap = (
-                self.random_min_horizontal_gap_input.value()
-                if self.randomize_horizontal_gap_input.isChecked()
-                else self.spacing_input.value()
-            )
-            minimum_vertical_gap = (
-                self.random_min_vertical_gap_input.value()
-                if self.randomize_vertical_gap_input.isChecked()
-                else self.spacing_input.value()
-            )
-            maximum_possible = (
-                maximum_width
-                / (maximum_width + minimum_horizontal_gap)
-                * maximum_height
-                / (maximum_height + minimum_vertical_gap)
-                * 100
-            )
-            if target > maximum_possible + 0.5:
-                messages.append(
-                    f"Cel poza szacowanym limitem: około {maximum_possible:.1f}%."
-                )
-            elif abs(open_area - target) > 0.5:
-                messages.append(
-                    "Nie osiągnięto celu; zmień zakres rozmiaru lub odstęp."
-                )
         messages.extend(self.drawing.warnings)
         if self.opening_type_input.currentData() == "custom":
             messages.extend(self.custom_opening_warnings)
@@ -1407,7 +1351,6 @@ class MainWindow(QMainWindow):
             inner_margin_mm=self.inner_margin_input.value(),
             perforation_as_block=self.perforation_export_input.currentData(),
             layout_mode=self.layout_mode_input.currentData(),
-            target_open_area_percentage=self.target_open_area_input.value(),
             random_min_width_mm=self.random_min_width_input.value(),
             random_max_width_mm=self.random_max_width_input.value(),
             random_min_height_mm=self.random_min_height_input.value(),

@@ -10,8 +10,8 @@ from shapely.errors import GEOSException
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 
-_VERSION = 4
-_SUPPORTED_VERSIONS = {1, 2, 3, 4}
+_VERSION = 5
+_SUPPORTED_VERSIONS = {1, 2, 3, 4, 5}
 _PATTERNS = {"square", "staggered"}
 _LAYOUT_MODES = {"grid", "random"}
 _OPENING_TYPES = {
@@ -45,7 +45,6 @@ class PerforationSettings:
     perforation_as_block: bool
     custom_opening: BaseGeometry | None = None
     layout_mode: str = "grid"
-    target_open_area_percentage: float = 30.0
     randomize_width: bool = True
     randomize_height: bool = False
     randomize_horizontal_gap: bool = False
@@ -71,7 +70,6 @@ class PerforationSettings:
             "opening_angle_degrees": (-180.0, 180.0),
             "outer_margin_mm": (0.0, 5000.0),
             "inner_margin_mm": (0.0, 5000.0),
-            "target_open_area_percentage": (0.1, 99.9),
             "random_min_width_mm": (0.1, 5000.0),
             "random_max_width_mm": (0.1, 5000.0),
             "random_min_height_mm": (0.1, 5000.0),
@@ -176,7 +174,6 @@ def save_perforation_settings(
         "perforation_as_block": settings.perforation_as_block,
         "custom_opening_wkb": custom_opening,
         "layout_mode": settings.layout_mode,
-        "target_open_area_percentage": settings.target_open_area_percentage,
         "randomize_width": settings.randomize_width,
         "randomize_height": settings.randomize_height,
         "randomize_horizontal_gap": settings.randomize_horizontal_gap,
@@ -243,9 +240,6 @@ def load_perforation_settings(
             perforation_as_block=data["perforation_as_block"],
             custom_opening=custom_opening,
             layout_mode=layout_mode,
-            target_open_area_percentage=data.get(
-                "target_open_area_percentage", 30.0
-            ),
             randomize_width=data.get(
                 "randomize_width", legacy_randomize_size
             ),
