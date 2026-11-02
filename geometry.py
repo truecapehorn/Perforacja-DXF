@@ -664,11 +664,21 @@ def generate_holes(
     spacing_mode: str,
     inner_margin_mm: float | None = None,
     opening_angle_degrees: float = 0.0,
+    vertical_spacing_mm: float | None = None,
 ) -> list[tuple[float, float]]:
     if opening_shape.is_empty or opening_shape.area <= 0:
         raise ValueError("Kształt otworu musi mieć dodatnie pole.")
-    if spacing_mm <= 0:
-        raise ValueError("Odstęp lub podziałka musi być większa od zera.")
+    use_legacy_staggered_pitch = vertical_spacing_mm is None
+    if vertical_spacing_mm is None:
+        vertical_spacing_mm = spacing_mm
+    if spacing_mode == "pitch":
+        if spacing_mm <= 0 or vertical_spacing_mm <= 0:
+            raise ValueError("Podziałka musi być większa od zera.")
+    elif (
+        spacing_mode == "gap"
+        and (spacing_mm < 0 or vertical_spacing_mm < 0)
+    ):
+        raise ValueError("Odstęp nie może być ujemny.")
     if margin_mm < 0 or (
         inner_margin_mm is not None and inner_margin_mm < 0
     ):
@@ -686,43 +696,74 @@ def generate_holes(
         for x in (min_x, max_x)
         for y in (shape_min_y, shape_max_y)
     )
-    if spacing_mode == "gap":
+    horizontal_gap = spacing_mm if spacing_mode == "gap" else 0.0
+    vertical_gap = vertical_spacing_mm if spacing_mode == "gap" else 0.0
 
-        def has_required_gap(pitch: float) -> bool:
-            row_pitch = (
-                pitch * math.sqrt(3) / 2
-                if pattern == "staggered"
-                else pitch
-            )
-            offsets = (
-                [(pitch, 0), (0, pitch)]
-                if pattern == "square"
-                else [
-                    (pitch, 0),
-                    (pitch / 2, row_pitch),
-                    (-pitch / 2, row_pitch),
-                ]
-            )
-            return all(
+    def pitch_for_gap(offset_x: float, offset_y: float, required: float) -> float:
+        required = max(required, 1e-7)
+
+        def has_gap(distance: float) -> bool:
+            return (
                 opening_shape.distance(
-                    translate(opening_shape, xoff=offset_x, yoff=offset_y)
+                    translate(
+                        opening_shape,
+                        xoff=offset_x * distance,
+                        yoff=offset_y * distance,
+                    )
                 )
                 + 1e-7
-                >= spacing_mm
-                for offset_x, offset_y in offsets
+                >= required
             )
 
         low = 0.0
-        high = max(2 * radius + spacing_mm, spacing_mm)
+        high = max(2 * radius + required, required)
         for _ in range(40):
             middle = (low + high) / 2
-            if has_required_gap(middle):
+            if has_gap(middle):
                 high = middle
             else:
                 low = middle
-        pitch = high
+        return high
+
+    if spacing_mode == "gap":
+        horizontal_pitch = pitch_for_gap(1, 0, horizontal_gap)
+        vertical_pitch = pitch_for_gap(0, 1, vertical_gap)
+        if pattern == "staggered":
+            required_diagonal_gap = min(horizontal_gap, vertical_gap)
+
+            def diagonal_gaps_satisfied(factor: float) -> bool:
+                return all(
+                    opening_shape.distance(
+                        translate(
+                            opening_shape,
+                            xoff=offset_x * horizontal_pitch * factor,
+                            yoff=vertical_pitch * factor,
+                        )
+                    )
+                    + 1e-7
+                    >= required_diagonal_gap
+                    for offset_x in (0.5, -0.5)
+                )
+
+            if required_diagonal_gap > 0 and not diagonal_gaps_satisfied(1):
+                low, high = 1.0, 2.0
+                while not diagonal_gaps_satisfied(high):
+                    high *= 2
+                for _ in range(40):
+                    middle = (low + high) / 2
+                    if diagonal_gaps_satisfied(middle):
+                        high = middle
+                    else:
+                        low = middle
+                horizontal_pitch *= high
+                vertical_pitch *= high
     else:
-        pitch = spacing_mm
+        horizontal_pitch = spacing_mm
+        vertical_pitch = (
+            vertical_spacing_mm
+            if not use_legacy_staggered_pitch or pattern != "staggered"
+            else spacing_mm * math.sqrt(3) / 2
+        )
 
     allowed = material_clearance(material, margin_mm, inner_margin_mm)
     if allowed.is_empty:
@@ -755,11 +796,9 @@ def generate_holes(
     local_max_x = max(point[0] for point in local_corners)
     local_min_y = min(point[1] for point in local_corners)
     local_max_y = max(point[1] for point in local_corners)
-    row_pitch = (
-        pitch * math.sqrt(3) / 2 if pattern == "staggered" else pitch
-    )
-    first_column = math.floor(local_min_x / pitch) - 1
-    last_column = math.ceil(local_max_x / pitch) + 1
+    row_pitch = vertical_pitch
+    first_column = math.floor(local_min_x / horizontal_pitch) - 1
+    last_column = math.ceil(local_max_x / horizontal_pitch) + 1
     first_row = math.floor(local_min_y / row_pitch) - 1
     last_row = math.ceil(local_max_y / row_pitch) + 1
     candidate_count = (last_column - first_column + 1) * (
@@ -774,7 +813,13 @@ def generate_holes(
     prepared = prep(allowed)
     holes: list[tuple[float, float]] = []
     center_limit = max(
-        2 * radius + (spacing_mm if spacing_mode == "gap" else 0), 1e-9
+        2 * radius
+        + (
+            max(horizontal_gap, vertical_gap)
+            if spacing_mode == "gap"
+            else 0
+        ),
+        1e-9,
     )
     cell_size = center_limit
     neighboring_holes: dict[
@@ -790,10 +835,14 @@ def generate_holes(
         origin=(0, 0),
     )
     for row in range(first_row, last_row + 1):
-        row_offset = pitch / 2 if pattern == "staggered" and row % 2 else 0.0
+        row_offset = (
+            horizontal_pitch / 2
+            if pattern == "staggered" and row % 2
+            else 0.0
+        )
         local_y = row * row_pitch
         for column in range(first_column, last_column + 1):
-            local_x = column * pitch + row_offset
+            local_x = column * horizontal_pitch + row_offset
             x = center_x + local_x * cosine - local_y * sine
             y = center_y + local_x * sine + local_y * cosine
             placed_opening = translate(rotated_opening, xoff=x, yoff=y)
@@ -826,7 +875,18 @@ def generate_holes(
                                 > 1e-9
                             )
                         else:
-                            collides = distance + 1e-7 < spacing_mm
+                            delta_x = abs(local_x - other_x)
+                            delta_y = abs(local_y - other_y)
+                            required_gap = (
+                                horizontal_gap
+                                if delta_y < 1e-7
+                                else (
+                                    vertical_gap
+                                    if delta_x < 1e-7
+                                    else min(horizontal_gap, vertical_gap)
+                                )
+                            )
+                            collides = distance + 1e-7 < required_gap
                         if collides:
                             raise ValueError(
                                 "Otwory nachodzą na siebie lub mają za mały "

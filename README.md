@@ -120,15 +120,16 @@ informację **NIE SKOPIOWANO** dla tej lokalizacji; sam plik pozostaje w `dist`.
 
 Program udostępnia:
 
-- **Koło** — parametr to średnica.
-- **Kwadrat** — parametr to długość boku.
-- **Prostokąt** — parametry to szerokość i wysokość.
-- **Trójkąt równoboczny** — parametr to szerokość podstawy.
-- **Owal / elipsa** — parametry to szerokość i wysokość.
-- **Fasolka** — parametry to całkowita długość i szerokość. Promień
-  zaokrąglenia końców wynika z szerokości i jest równy jej połowie. Długość
-  musi być równa lub większa od szerokości.
-- **Wielokąt foremny** — szerokość oraz liczba boków od 3 do 20.
+- **Koło**, **kwadrat**, **trójkąt równoboczny** i **wielokąt foremny** —
+  jeden wymiar: szerokość otworu. Dla koła odpowiada ona średnicy, a dla
+  kwadratu długości boku. Wielokąt foremny ma dodatkowo liczbę boków od 3 do
+  20.
+- **Prostokąt** i **owal / elipsa** — szerokość otworu (poziomo) oraz
+  wysokość otworu (pionowo).
+- **Fasolka** — szerokość otworu (poziomo) i wysokość otworu (pionowo).
+  Wysokość określa szerokość fasolki, promień zaokrąglenia końców wynika z
+  niej i jest równy jej połowie. Szerokość musi być równa lub większa od
+  wysokości.
 - **Własny kształt z DXF** — wybierz osobny plik z zamkniętym konturem.
   Kształt jest skalowany do podanej szerokości z zachowaniem proporcji;
   jego wysokość wynika z proporcji wczytanego pliku.
@@ -137,30 +138,34 @@ Wymiary kształtów i odstępy podaje się w milimetrach.
 
 ### Układ, odległości i kąty
 
-- **Układ prosty (kwadratowy)** rozmieszcza środki otworów w równych
-  odstępach poziomo i pionowo.
+- **Układ prosty (kwadratowy)** rozmieszcza środki otworów z osobno
+  ustawianym odstępem / podziałką poziomą i pionową.
 - **Układ mijankowy** przesuwa co drugi rząd o połowę podziałki.
 - **Układ losowy** rozmieszcza otwory w losowych miejscach, bez nakładania i
   z zachowaniem marginesów. Rozkłada perforację na całej dostępnej wysokości
-  detalu, także w oddzielnych fragmentach konturu. Można niezależnie włączyć
-  losowanie szerokości, wysokości oraz odstępu poziomego i pionowego, podając
-  zakres min–max każdego losowanego parametru. Wymiary i odstępy są losowane
-  niezależnie i nie są dopasowywane do docelowego prześwitu. Przy losowym
-  odstępie pionowym każdy otwór jest przesuwany w pionie niezależnie, dzięki
-  czemu nie tworzą się równe rzędy. Niezaznaczone
-  wymiary wynikają z ustawionego kształtu, a niezaznaczony odstęp korzysta
-  z parametru odstępu z trybu siatki. Układ jest przeliczany wyłącznie po
+  detalu, także w oddzielnych fragmentach konturu. Losowanie wymiaru można
+  włączyć bezpośrednio przy polu szerokości lub wysokości; po włączeniu
+  pojedyncze pole wartości zastępuje zakres min–max. Można niezależnie
+  włączyć losowanie szerokości, wysokości oraz odstępu poziomego i pionowego,
+  podając zakres min–max każdego losowanego parametru. Wymiary i odstępy są
+  losowane niezależnie i nie są dopasowywane do docelowego prześwitu. Przy
+  Wartości stałego odstępu poziomego i pionowego można ustawić niezależnie
+  również poza losowaniem. Przy losowym odstępie pionowym każdy otwór jest
+  przesuwany w pionie niezależnie,
+  dzięki czemu nie tworzą się równe rzędy. Niezaznaczone
+  wymiary wynikają z ustawionego kształtu, a niezaznaczony odstęp poziomy lub
+  pionowy korzysta z odpowiadającej mu wartości stałej. Układ jest
+  przeliczany wyłącznie po
   kliknięciu **Losuj losowy układ**. Podczas obliczeń działa okno postępu
   z możliwością anulowania, a interfejs pozostaje responsywny. Pasek statusu
   pokazuje uzyskany stopień prześwitu.
 - **Tryb odległości — odstęp między krawędziami** oznacza minimalną
-  szczelinę pomiędzy obrysami sąsiednich otworów. Program dobiera podziałkę
-  na podstawie rzeczywistego kształtu i sprawdza, czy otwory nie zachodzą
-  na siebie.
+  szczelinę pomiędzy obrysami sąsiednich otworów; odstęp poziomy i pionowy
+  są ustawiane niezależnie. Program dobiera podziałkę na podstawie
+  rzeczywistego kształtu i sprawdza, czy otwory nie zachodzą na siebie.
 - **Tryb odległości — podziałka osiowa** ustawia odległość między środkami
-  sąsiednich otworów. W układzie mijankowym podana wartość jest odległością
-  po przekątnej do sąsiada w kolejnym rzędzie; odległość między rzędami
-  wynosi `podziałka × √3 / 2`.
+  sąsiednich otworów. Podziałki poziomą i pionową można ustawiać niezależnie;
+  w układzie mijankowym pionowa podziałka określa odległość między rzędami.
 - **Kąt siatki** obraca układ rozmieszczenia względem detalu.
 - **Kąt kształtu względem siatki** obraca sam otwór niezależnie od układu.
   Wartość 0° oznacza, że kształt obraca się razem z siatką, jak w

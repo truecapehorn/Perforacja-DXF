@@ -63,11 +63,28 @@ def test_random_settings_round_trip_preserves_generation_options(tmp_path):
         random_min_vertical_gap_mm=2.5,
         random_max_vertical_gap_mm=5.5,
         random_seed=12345,
+        horizontal_spacing_mm=7.0,
+        vertical_spacing_mm=13.0,
     )
 
     save_perforation_settings(path, settings)
 
     assert load_perforation_settings(path) == settings
+
+
+def test_legacy_settings_use_same_horizontal_and_vertical_spacing(tmp_path):
+    path = tmp_path / "legacy-spacing.json"
+    settings = make_settings()
+    save_perforation_settings(path, settings)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.pop("horizontal_spacing_mm")
+    data.pop("vertical_spacing_mm")
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = load_perforation_settings(path)
+
+    assert loaded.horizontal_spacing_mm == settings.spacing_mm
+    assert loaded.vertical_spacing_mm == settings.spacing_mm
 
 
 def test_settings_load_version_one_without_random_options(tmp_path):

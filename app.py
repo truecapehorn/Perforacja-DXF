@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -467,12 +468,87 @@ class MainWindow(QMainWindow):
         self.opening_type_input.addItem("Wielokąt foremny", "regular_polygon")
         self.opening_type_input.addItem("Własny kształt z DXF", "custom")
         form.addRow("Kształt otworu:", self.opening_type_input)
+
+        def dimension_range_row(
+            minimum: float,
+            maximum: float,
+            lower_bound: float = 0.1,
+            upper_bound: float = 5000.0,
+        ) -> tuple[QWidget, QDoubleSpinBox, QDoubleSpinBox]:
+            row = QWidget()
+            row_layout = QGridLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setHorizontalSpacing(8)
+            row_layout.setVerticalSpacing(2)
+            row_layout.addWidget(QLabel("min"), 0, 0)
+            minimum_input = _parameter_input(
+                minimum, lower_bound, upper_bound
+            )
+            minimum_input.setMinimumWidth(100)
+            row_layout.addWidget(minimum_input, 1, 0)
+            row_layout.addWidget(QLabel("max"), 0, 1)
+            maximum_input = _parameter_input(
+                maximum, lower_bound, upper_bound
+            )
+            maximum_input.setMinimumWidth(100)
+            row_layout.addWidget(maximum_input, 1, 1)
+            row_layout.setColumnStretch(0, 1)
+            row_layout.setColumnStretch(1, 1)
+            return row, minimum_input, maximum_input
+
+        def dimension_controls(
+            label: QLabel,
+            value_input: QDoubleSpinBox,
+            randomize_input: QCheckBox,
+            range_label: QLabel,
+            range_widget: QWidget,
+        ) -> QWidget:
+            controls = QWidget()
+            controls_layout = QVBoxLayout(controls)
+            controls_layout.setContentsMargins(0, 0, 0, 0)
+            controls_layout.setSpacing(4)
+            controls_layout.addWidget(label)
+            controls_layout.addWidget(value_input)
+            controls_layout.addWidget(randomize_input)
+            controls_layout.addWidget(range_label)
+            controls_layout.addWidget(range_widget)
+            return controls
+
         self.opening_width_input = _parameter_input(10.0, 0.1, 5000.0)
-        self.opening_width_label = QLabel("Średnica otworu:")
-        form.addRow(self.opening_width_label, self.opening_width_input)
+        self.opening_width_label = QLabel("Szerokość otworu:")
+        self.randomize_width_input = QCheckBox("Losuj szerokość")
+        self.randomize_width_input.setChecked(True)
+        (
+            self.random_width_range,
+            self.random_min_width_input,
+            self.random_max_width_input,
+        ) = dimension_range_row(10.0, 20.0)
+        self.random_width_range_label = QLabel("Zakres:")
+        self.opening_width_controls = dimension_controls(
+            self.opening_width_label,
+            self.opening_width_input,
+            self.randomize_width_input,
+            self.random_width_range_label,
+            self.random_width_range,
+        )
+        form.addRow(self.opening_width_controls)
         self.opening_height_input = _parameter_input(10.0, 0.1, 5000.0)
-        self.opening_height_label = QLabel("Wysokość otworu:")
-        form.addRow(self.opening_height_label, self.opening_height_input)
+        self.opening_height_label = QLabel("Wysokość otworu (pionowo):")
+        self.randomize_height_input = QCheckBox("Losuj wysokość")
+        (
+            self.random_height_range,
+            self.random_min_height_input,
+            self.random_max_height_input,
+        ) = dimension_range_row(10.0, 20.0)
+        self.random_height_range_label = QLabel("Zakres:")
+        self.opening_height_controls = dimension_controls(
+            self.opening_height_label,
+            self.opening_height_input,
+            self.randomize_height_input,
+            self.random_height_range_label,
+            self.random_height_range,
+        )
+        form.addRow(self.opening_height_controls)
         self.polygon_sides_input = QSpinBox()
         self.polygon_sides_input.setRange(3, 20)
         self.polygon_sides_input.setValue(6)
@@ -490,9 +566,6 @@ class MainWindow(QMainWindow):
         custom_shape_layout.addWidget(self.custom_opening_name)
         self.custom_opening_row_label = QLabel("Własny kształt:")
         form.addRow(self.custom_opening_row_label, self.custom_opening_row)
-        self.spacing_input = _parameter_input(10.0, 0.1, 10_000.0)
-        self.spacing_label = QLabel("Odstęp / podziałka:")
-        form.addRow(self.spacing_label, self.spacing_input)
         self.spacing_mode = QComboBox()
         self.spacing_mode.addItem("Odstęp między krawędziami", "gap")
         self.spacing_mode.addItem("Podziałka osiowa", "pitch")
@@ -519,78 +592,50 @@ class MainWindow(QMainWindow):
             "Margines od krawędzi wewnętrznej / wyspy:",
             self.inner_margin_input,
         )
-        def dimension_range_row(
-            minimum: float,
-            maximum: float,
-            lower_bound: float = 0.1,
-            upper_bound: float = 5000.0,
-        ) -> tuple[QWidget, QDoubleSpinBox, QDoubleSpinBox]:
-            row = QWidget()
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.addWidget(QLabel("min"))
-            minimum_input = _parameter_input(
-                minimum, lower_bound, upper_bound
-            )
-            minimum_input.setMinimumWidth(115)
-            row_layout.addWidget(minimum_input)
-            row_layout.addWidget(QLabel("max"))
-            maximum_input = _parameter_input(
-                maximum, lower_bound, upper_bound
-            )
-            maximum_input.setMinimumWidth(115)
-            row_layout.addWidget(maximum_input)
-            return row, minimum_input, maximum_input
 
-        self.randomize_width_input = QCheckBox("Losuj szerokość")
-        self.randomize_width_input.setChecked(True)
-        form.addRow(self.randomize_width_input)
-        (
-            self.random_width_range,
-            self.random_min_width_input,
-            self.random_max_width_input,
-        ) = dimension_range_row(10.0, 20.0)
-        self.random_width_range_label = QLabel("Zakres szerokości:")
-        form.addRow(self.random_width_range_label)
-        form.addRow(self.random_width_range)
-        self.randomize_height_input = QCheckBox("Losuj wysokość")
-        form.addRow(self.randomize_height_input)
-        (
-            self.random_height_range,
-            self.random_min_height_input,
-            self.random_max_height_input,
-        ) = dimension_range_row(10.0, 20.0)
-        self.random_height_range_label = QLabel("Zakres wysokości:")
-        form.addRow(self.random_height_range_label)
-        form.addRow(self.random_height_range)
+        self.horizontal_spacing_input = _parameter_input(
+            10.0, 0.0, 10_000.0
+        )
         self.randomize_horizontal_gap_input = QCheckBox(
             "Losuj odstęp poziomy"
         )
-        form.addRow(self.randomize_horizontal_gap_input)
         (
             self.random_horizontal_gap_range,
             self.random_min_horizontal_gap_input,
             self.random_max_horizontal_gap_input,
         ) = dimension_range_row(2.0, 8.0, 0.0, 10_000.0)
-        self.random_horizontal_gap_range_label = QLabel(
-            "Zakres odstępu poziomego:"
+        self.random_horizontal_gap_range_label = QLabel("Zakres:")
+        self.horizontal_spacing_label = QLabel("Odstęp / podziałka pozioma:")
+        self.horizontal_spacing_controls = dimension_controls(
+            self.horizontal_spacing_label,
+            self.horizontal_spacing_input,
+            self.randomize_horizontal_gap_input,
+            self.random_horizontal_gap_range_label,
+            self.random_horizontal_gap_range,
         )
-        form.addRow(self.random_horizontal_gap_range_label)
-        form.addRow(self.random_horizontal_gap_range)
+        form.addRow(self.horizontal_spacing_controls)
+
+        self.vertical_spacing_input = _parameter_input(
+            10.0, 0.0, 10_000.0
+        )
         self.randomize_vertical_gap_input = QCheckBox(
             "Losuj odstęp pionowy"
         )
-        form.addRow(self.randomize_vertical_gap_input)
         (
             self.random_vertical_gap_range,
             self.random_min_vertical_gap_input,
             self.random_max_vertical_gap_input,
         ) = dimension_range_row(2.0, 8.0, 0.0, 10_000.0)
-        self.random_vertical_gap_range_label = QLabel(
-            "Zakres odstępu pionowego:"
+        self.random_vertical_gap_range_label = QLabel("Zakres:")
+        self.vertical_spacing_label = QLabel("Odstęp / podziałka pionowa:")
+        self.vertical_spacing_controls = dimension_controls(
+            self.vertical_spacing_label,
+            self.vertical_spacing_input,
+            self.randomize_vertical_gap_input,
+            self.random_vertical_gap_range_label,
+            self.random_vertical_gap_range,
         )
-        form.addRow(self.random_vertical_gap_range_label)
-        form.addRow(self.random_vertical_gap_range)
+        form.addRow(self.vertical_spacing_controls)
         self.regenerate_random_button = QPushButton("Losuj losowy układ")
         form.addRow(self.regenerate_random_button)
         layout.addLayout(form)
@@ -624,7 +669,8 @@ class MainWindow(QMainWindow):
             self.pattern_input,
             self.opening_width_input,
             self.opening_height_input,
-            self.spacing_input,
+            self.horizontal_spacing_input,
+            self.vertical_spacing_input,
             self.spacing_mode,
             self.angle_input,
             self.opening_angle_input,
@@ -712,7 +758,8 @@ class MainWindow(QMainWindow):
             self.opening_width_input,
             self.opening_height_input,
             self.polygon_sides_input,
-            self.spacing_input,
+            self.horizontal_spacing_input,
+            self.vertical_spacing_input,
             self.spacing_mode,
             self.angle_input,
             self.opening_angle_input,
@@ -750,7 +797,10 @@ class MainWindow(QMainWindow):
             self.opening_width_input.setValue(settings.opening_width_mm)
             self.opening_height_input.setValue(settings.opening_height_mm)
             self.polygon_sides_input.setValue(settings.polygon_sides)
-            self.spacing_input.setValue(settings.spacing_mm)
+            self.horizontal_spacing_input.setValue(
+                settings.horizontal_spacing_mm
+            )
+            self.vertical_spacing_input.setValue(settings.vertical_spacing_mm)
             self.spacing_mode.setCurrentIndex(
                 self.spacing_mode.findData(settings.spacing_mode)
             )
@@ -898,22 +948,22 @@ class MainWindow(QMainWindow):
             min_horizontal_gap = (
                 self.random_min_horizontal_gap_input.value()
                 if self.randomize_horizontal_gap_input.isChecked()
-                else self.spacing_input.value()
+                else self.horizontal_spacing_input.value()
             )
             max_horizontal_gap = (
                 self.random_max_horizontal_gap_input.value()
                 if self.randomize_horizontal_gap_input.isChecked()
-                else self.spacing_input.value()
+                else self.horizontal_spacing_input.value()
             )
             min_vertical_gap = (
                 self.random_min_vertical_gap_input.value()
                 if self.randomize_vertical_gap_input.isChecked()
-                else self.spacing_input.value()
+                else self.vertical_spacing_input.value()
             )
             max_vertical_gap = (
                 self.random_max_vertical_gap_input.value()
                 if self.randomize_vertical_gap_input.isChecked()
-                else self.spacing_input.value()
+                else self.vertical_spacing_input.value()
             )
             margin = self.margin_input.value()
             inner_margin = self.inner_margin_input.value()
@@ -1048,16 +1098,7 @@ class MainWindow(QMainWindow):
 
     def _update_random_controls(self) -> None:
         is_random = self.layout_mode_input.currentData() == "random"
-        height_randomizable = (
-            self.opening_type_input.currentData()
-            in {"rectangle", "ellipse", "slot"}
-        )
         random_width = is_random and self.randomize_width_input.isChecked()
-        random_height = (
-            is_random
-            and height_randomizable
-            and self.randomize_height_input.isChecked()
-        )
         random_horizontal_gap = (
             is_random and self.randomize_horizontal_gap_input.isChecked()
         )
@@ -1066,14 +1107,14 @@ class MainWindow(QMainWindow):
         )
         for widget in (
             self.randomize_width_input,
-            self.random_width_range_label,
             self.randomize_horizontal_gap_input,
             self.randomize_vertical_gap_input,
             self.regenerate_random_button,
         ):
             widget.setVisible(is_random)
+        self.opening_width_input.setVisible(not random_width)
+        self.random_width_range_label.setVisible(random_width)
         self.random_width_range.setVisible(random_width)
-        self.random_height_range.setVisible(random_height)
         self.random_horizontal_gap_range_label.setVisible(
             random_horizontal_gap
         )
@@ -1082,22 +1123,29 @@ class MainWindow(QMainWindow):
         self.random_vertical_gap_range.setVisible(random_vertical_gap)
         self.pattern_input.setVisible(not is_random)
         self.pattern_label.setVisible(not is_random)
-        fixed_gaps_remain = not random_horizontal_gap or not random_vertical_gap
-        self.spacing_label.setVisible(not is_random or fixed_gaps_remain)
-        self.spacing_input.setVisible(
-            not is_random or fixed_gaps_remain
+        self.horizontal_spacing_input.setVisible(not random_horizontal_gap)
+        self.vertical_spacing_input.setVisible(not random_vertical_gap)
+        self.random_horizontal_gap_range_label.setVisible(
+            random_horizontal_gap
         )
-        if is_random and fixed_gaps_remain:
-            if not random_horizontal_gap and not random_vertical_gap:
-                self.spacing_label.setText("Stały odstęp poziomy i pionowy:")
-            elif not random_horizontal_gap:
-                self.spacing_label.setText("Stały odstęp poziomy:")
-            else:
-                self.spacing_label.setText("Stały odstęp pionowy:")
+        self.random_horizontal_gap_range.setVisible(random_horizontal_gap)
+        self.random_vertical_gap_range_label.setVisible(random_vertical_gap)
+        self.random_vertical_gap_range.setVisible(random_vertical_gap)
         self.spacing_mode_label.setVisible(not is_random)
         self.spacing_mode.setVisible(not is_random)
-        if not is_random:
-            self.spacing_label.setText("Odstęp / podziałka:")
+        minimum_spacing = (
+            0.1
+            if not is_random and self.spacing_mode.currentData() == "pitch"
+            else 0.0
+        )
+        self.horizontal_spacing_input.setMinimum(minimum_spacing)
+        self.vertical_spacing_input.setMinimum(minimum_spacing)
+        self.horizontal_spacing_label.setText(
+            "Odstęp / podziałka pozioma:"
+        )
+        self.vertical_spacing_label.setText(
+            "Odstęp / podziałka pionowa:"
+        )
         self.angle_label.setText(
             "Kąt otworów:" if is_random else "Kąt siatki:"
         )
@@ -1113,34 +1161,28 @@ class MainWindow(QMainWindow):
             self.randomize_height_input.setChecked(False)
             self.randomize_height_input.blockSignals(previous_state)
         is_random = self.layout_mode_input.currentData() == "random"
-        self.randomize_height_input.setVisible(is_random and height_randomizable)
-        self.random_height_range_label.setVisible(
-            is_random and height_randomizable
-        )
-        self.random_height_range.setVisible(
+        random_height = (
             is_random
             and height_randomizable
             and self.randomize_height_input.isChecked()
         )
+        self.randomize_height_input.setVisible(is_random and height_randomizable)
+        self.opening_height_input.setVisible(
+            height_randomizable and not random_height
+        )
+        self.random_height_range_label.setVisible(random_height)
+        self.random_height_range.setVisible(random_height)
         self.randomize_height_input.setEnabled(height_randomizable)
         self.random_height_range_label.setEnabled(height_randomizable)
         self.random_height_range.setEnabled(height_randomizable)
-        self.opening_width_label.setText(
-            {
-                "circle": "Średnica otworu:",
-                "square": "Bok kwadratu:",
-                "triangle": "Szerokość trójkąta:",
-                "slot": "Długość fasolki:",
-            }.get(opening_type, "Szerokość otworu:")
-        )
         show_height = opening_type in {"rectangle", "ellipse", "slot"}
         self.opening_height_label.setVisible(show_height)
-        self.opening_height_input.setVisible(show_height)
-        self.opening_height_label.setText(
-            "Szerokość fasolki:"
-            if opening_type == "slot"
-            else "Wysokość otworu:"
+        self.opening_width_label.setText(
+            "Szerokość otworu (poziomo):"
+            if show_height
+            else "Szerokość otworu:"
         )
+        self.opening_height_label.setText("Wysokość otworu (pionowo):")
         show_sides = opening_type == "regular_polygon"
         self.polygon_sides_input.setVisible(show_sides)
         self.polygon_sides_label.setVisible(show_sides)
@@ -1149,12 +1191,6 @@ class MainWindow(QMainWindow):
         self.custom_opening_name.setVisible(show_custom)
         self.custom_opening_row.setVisible(show_custom)
         self.custom_opening_row_label.setVisible(show_custom)
-        if opening_type == "slot":
-            self.random_width_range_label.setText("Zakres długości fasolki:")
-            self.random_height_range_label.setText("Zakres szerokości fasolki:")
-        else:
-            self.random_width_range_label.setText("Zakres szerokości:")
-            self.random_height_range_label.setText("Zakres wysokości:")
 
     def _choose_opening_shape(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -1202,12 +1238,6 @@ class MainWindow(QMainWindow):
         if self.layout_mode_input.currentData() == "random":
             self._parameters_changed()
             return
-        self.spacing_label.setText(
-            "Podziałka po przekątnej:"
-            if self.pattern_input.currentData() == "staggered"
-            and self.spacing_mode.currentData() == "pitch"
-            else "Odstęp / podziałka:"
-        )
         try:
             material = resize_material(
                 self.drawing.material,
@@ -1224,13 +1254,14 @@ class MainWindow(QMainWindow):
             holes = generate_holes(
                 material,
                 opening_shape,
-                self.spacing_input.value(),
+                self.horizontal_spacing_input.value(),
                 self.margin_input.value(),
                 self.angle_input.value(),
                 self.pattern_input.currentData(),
                 self.spacing_mode.currentData(),
                 inner_margin_mm=self.inner_margin_input.value(),
                 opening_angle_degrees=self.opening_angle_input.value(),
+                vertical_spacing_mm=self.vertical_spacing_input.value(),
             )
         except ValueError as error:
             self.preview_material = None
@@ -1381,7 +1412,9 @@ class MainWindow(QMainWindow):
             opening_width_mm=self.opening_width_input.value(),
             opening_height_mm=self.opening_height_input.value(),
             polygon_sides=self.polygon_sides_input.value(),
-            spacing_mm=self.spacing_input.value(),
+            spacing_mm=max(self.horizontal_spacing_input.value(), 0.1),
+            horizontal_spacing_mm=self.horizontal_spacing_input.value(),
+            vertical_spacing_mm=self.vertical_spacing_input.value(),
             spacing_mode=self.spacing_mode.currentData(),
             grid_angle_degrees=self.angle_input.value(),
             opening_angle_degrees=self.opening_angle_input.value(),

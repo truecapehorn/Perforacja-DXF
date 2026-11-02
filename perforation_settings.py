@@ -58,14 +58,22 @@ class PerforationSettings:
     random_min_vertical_gap_mm: float = 2.0
     random_max_vertical_gap_mm: float = 8.0
     random_seed: int = 0
+    horizontal_spacing_mm: float | None = None
+    vertical_spacing_mm: float | None = None
 
     def __post_init__(self) -> None:
+        if self.horizontal_spacing_mm is None:
+            object.__setattr__(self, "horizontal_spacing_mm", self.spacing_mm)
+        if self.vertical_spacing_mm is None:
+            object.__setattr__(self, "vertical_spacing_mm", self.spacing_mm)
         numeric_ranges = {
             "width_mm": (0.1, 100_000.0),
             "height_mm": (0.1, 100_000.0),
             "opening_width_mm": (0.1, 5000.0),
             "opening_height_mm": (0.1, 5000.0),
             "spacing_mm": (0.1, 10_000.0),
+            "horizontal_spacing_mm": (0.0, 10_000.0),
+            "vertical_spacing_mm": (0.0, 10_000.0),
             "grid_angle_degrees": (-180.0, 180.0),
             "opening_angle_degrees": (-180.0, 180.0),
             "outer_margin_mm": (0.0, 5000.0),
@@ -133,6 +141,15 @@ class PerforationSettings:
         ):
             raise ValueError("Zakres losowanego parametru jest nieprawidłowy.")
         if (
+            self.layout_mode == "grid"
+            and self.spacing_mode == "pitch"
+            and (
+                self.horizontal_spacing_mm <= 0
+                or self.vertical_spacing_mm <= 0
+            )
+        ):
+            raise ValueError("Podziałka musi być większa od zera.")
+        if (
             isinstance(self.random_seed, bool)
             or not isinstance(self.random_seed, int)
             or not 0 <= self.random_seed <= 2**32 - 1
@@ -166,6 +183,8 @@ def save_perforation_settings(
         "opening_height_mm": settings.opening_height_mm,
         "polygon_sides": settings.polygon_sides,
         "spacing_mm": settings.spacing_mm,
+        "horizontal_spacing_mm": settings.horizontal_spacing_mm,
+        "vertical_spacing_mm": settings.vertical_spacing_mm,
         "spacing_mode": settings.spacing_mode,
         "grid_angle_degrees": settings.grid_angle_degrees,
         "opening_angle_degrees": settings.opening_angle_degrees,
@@ -232,6 +251,10 @@ def load_perforation_settings(
             opening_height_mm=data["opening_height_mm"],
             polygon_sides=data["polygon_sides"],
             spacing_mm=spacing_mm,
+            horizontal_spacing_mm=data.get(
+                "horizontal_spacing_mm", spacing_mm
+            ),
+            vertical_spacing_mm=data.get("vertical_spacing_mm", spacing_mm),
             spacing_mode=data["spacing_mode"],
             grid_angle_degrees=data["grid_angle_degrees"],
             opening_angle_degrees=data["opening_angle_degrees"],

@@ -88,6 +88,58 @@ def test_square_pitch_remains_equal_in_horizontal_and_vertical_directions():
     )
 
 
+def test_square_grid_supports_independent_horizontal_and_vertical_pitch():
+    square = Polygon([(0, 0), (60, 0), (60, 60), (0, 60)])
+
+    holes = generate_holes(
+        square,
+        make_opening_shape("circle", 2),
+        8,
+        0,
+        0,
+        "square",
+        "pitch",
+        vertical_spacing_mm=12,
+    )
+
+    x_values = sorted({round(x, 6) for x, _ in holes})
+    y_values = sorted({round(y, 6) for _, y in holes})
+    assert all(
+        math.isclose(second - first, 8.0)
+        for first, second in zip(x_values, x_values[1:])
+    )
+    assert all(
+        math.isclose(second - first, 12.0)
+        for first, second in zip(y_values, y_values[1:])
+    )
+
+
+def test_square_grid_supports_independent_horizontal_and_vertical_gaps():
+    square = Polygon([(0, 0), (60, 0), (60, 60), (0, 60)])
+
+    holes = generate_holes(
+        square,
+        make_opening_shape("circle", 2),
+        4,
+        0,
+        0,
+        "square",
+        "gap",
+        vertical_spacing_mm=8,
+    )
+
+    x_values = sorted({round(x, 6) for x, _ in holes})
+    y_values = sorted({round(y, 6) for _, y in holes})
+    assert all(
+        math.isclose(second - first, 6.0)
+        for first, second in zip(x_values, x_values[1:])
+    )
+    assert all(
+        math.isclose(second - first, 10.0)
+        for first, second in zip(y_values, y_values[1:])
+    )
+
+
 def test_margin_keeps_full_holes_clear_of_outer_and_inner_edges():
     shape = Polygon(
         [(0, 0), (100, 0), (100, 100), (0, 100)],
