@@ -94,9 +94,15 @@ informację **NIE SKOPIOWANO** dla tej lokalizacji; sam plik pozostaje w `dist`.
    odległości, kąty oraz marginesy.
 4. Sprawdź podgląd perforacji. Przybliżaj i oddalaj go kółkiem myszy albo
    przyciskami **+** i **−**; przycisk **Dopasuj** przywraca widok całego
-   detalu. Zmiany parametrów są przeliczane automatycznie. Jeśli konfiguracja
+   detalu. Podgląd ma włączoną siatkę dopasowującą podziałkę 1, 10 lub 100 mm
+   do powiększenia; jej początek pokrywa się z krawędzią zewnętrzną detalu.
+   Siatkę można wyłączyć opcją **Siatka**. Zmiany parametrów są przeliczane
+   automatycznie. Jeśli konfiguracja
    jest nieprawidłowa, komunikat błędu pojawi się na dole, a eksport zostanie
-   wyłączony.
+   wyłączony. Przycisk **Wymiaruj** pozwala kliknąć dwa punkty na krawędzi
+   detalu lub otworu; podgląd przyciąga punkty do najbliższych krawędzi i
+   pokazuje odległość całkowitą oraz składowe poziomą i pionową. Kliknij
+   **Wyczyść wymiar**, aby usunąć oznaczenie.
 5. Wybierz sposób eksportu perforacji i nazwę pliku, a następnie kliknij
    **Eksportuj DXF**. Obok DXF zostanie zapisany plik konfiguracji JSON o tej
    samej nazwie. Program nie pozwala nadpisać aktualnie otwartego pliku

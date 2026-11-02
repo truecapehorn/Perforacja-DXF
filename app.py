@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import secrets
 import sys
 from pathlib import Path
@@ -41,8 +42,10 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 from shapely.errors import GEOSException
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.affinity import rotate, translate
+from shapely.geometry import MultiPolygon, Point, Polygon
 from shapely.geometry.base import BaseGeometry
+from shapely.ops import nearest_points
 
 from perforation_settings import (
     PerforationSettings,
@@ -96,6 +99,8 @@ class RandomPerforationWorker(QObject):
 
 class Preview(QWidget):
     zoomChanged = pyqtSignal(float)
+    measurementChanged = pyqtSignal(str)
+    gridSpacingChanged = pyqtSignal(int)
 
     def __init__(self, title: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -111,6 +116,10 @@ class Preview(QWidget):
         self.zoom_factor = 1.0
         self.pan_offset = QPointF()
         self._drag_position: QPoint | None = None
+        self.measurement_mode = False
+        self.measurement_points: list[tuple[float, float]] = []
+        self.grid_visible = True
+        self.grid_spacing_mm = 100
         self.setCursor(Qt.OpenHandCursor)
         self.setMinimumSize(320, 300)
 
@@ -119,13 +128,35 @@ class Preview(QWidget):
         self.zoomChanged.emit(self.zoom_factor)
         self.update()
 
+    def set_grid_visible(self, visible: bool) -> None:
+        self.grid_visible = visible
+        self.update()
+
     def reset_zoom(self) -> None:
         self.set_zoom(1.0)
         self.pan_offset = QPointF()
         self.update()
 
+    def set_measurement_mode(self, enabled: bool) -> None:
+        self.measurement_mode = enabled
+        self._drag_position = None
+        self.setCursor(Qt.CrossCursor if enabled else Qt.OpenHandCursor)
+        if not enabled:
+            self.measurement_points.clear()
+            self.measurementChanged.emit("")
+        self.update()
+
+    def clear_measurement(self) -> None:
+        self.measurement_points.clear()
+        self.measurementChanged.emit("")
+        self.update()
+
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
+            if self.measurement_mode:
+                self._add_measurement_point(event.pos())
+                event.accept()
+                return
             self._drag_position = event.pos()
             self.setCursor(Qt.ClosedHandCursor)
             event.accept()
@@ -178,6 +209,93 @@ class Preview(QWidget):
         self.angle = angle + opening_angle
         self.inner_margin = margin if inner_margin is None else inner_margin
         self.hole_openings = hole_openings or []
+        self.clear_measurement()
+        self.update()
+
+    def _view_scale(self) -> float:
+        if self.material is None:
+            return 1.0
+        min_x, min_y, max_x, max_y = self.material.bounds
+        width = max(max_x - min_x, 1e-9)
+        height = max(max_y - min_y, 1e-9)
+        padding = 36.0
+        return min(
+            max((self.width() - 2 * padding) / width, 1e-9),
+            max((self.height() - 2 * padding) / height, 1e-9),
+        ) * self.zoom_factor
+
+    @staticmethod
+    def _grid_spacing_for_scale(factor: float) -> int:
+        for spacing in (1, 10, 100):
+            if spacing * factor >= 30:
+                return spacing
+        return 100
+
+    def _screen_to_world(self, position: QPoint) -> tuple[float, float]:
+        assert self.material is not None
+        min_x, min_y, max_x, max_y = self.material.bounds
+        factor = self._view_scale()
+        center_x = self.width() / 2 + self.pan_offset.x()
+        center_y = self.height() / 2 + 5 + self.pan_offset.y()
+        return (
+            (position.x() - center_x) / factor + (min_x + max_x) / 2,
+            -(position.y() - center_y) / factor + (min_y + max_y) / 2,
+        )
+
+    def _snap_measurement_point(
+        self, position: tuple[float, float]
+    ) -> tuple[float, float]:
+        assert self.material is not None
+        point = Point(position)
+        candidates: list[BaseGeometry] = [self.material.boundary]
+        centers = sorted(
+            enumerate(self.holes),
+            key=lambda item: (item[1][0] - position[0]) ** 2
+            + (item[1][1] - position[1]) ** 2,
+        )[:12]
+        for hole_index, (x, y) in centers:
+            opening = (
+                self.hole_openings[hole_index]
+                if hole_index < len(self.hole_openings)
+                else self.opening_shape
+            )
+            if opening is None:
+                continue
+            oriented = rotate(opening, self.angle, origin=(0, 0))
+            candidates.append(translate(oriented, xoff=x, yoff=y))
+        closest_point: Point | None = None
+        closest_distance = math.inf
+        for geometry in candidates:
+            snapped = nearest_points(geometry, point)[0]
+            distance = snapped.distance(point)
+            if distance < closest_distance:
+                closest_point = snapped
+                closest_distance = distance
+        if closest_point is None:
+            return position
+        return closest_point.x, closest_point.y
+
+    def _add_measurement_point(self, position: QPoint) -> None:
+        if self.material is None or self.material.is_empty:
+            return
+        if len(self.measurement_points) == 2:
+            self.measurement_points.clear()
+        world_point = self._snap_measurement_point(
+            self._screen_to_world(position)
+        )
+        self.measurement_points.append(world_point)
+        if len(self.measurement_points) == 2:
+            first, second = self.measurement_points
+            delta_x = abs(second[0] - first[0])
+            delta_y = abs(second[1] - first[1])
+            distance = math.hypot(delta_x, delta_y)
+            self.measurementChanged.emit(
+                f"Odległość: {distance:.2f} mm  |  "
+                f"poziomo: {delta_x:.2f} mm  |  "
+                f"pionowo: {delta_y:.2f} mm"
+            )
+        else:
+            self.measurementChanged.emit("Wskaż drugi punkt pomiaru.")
         self.update()
 
     def paintEvent(self, _event) -> None:
@@ -192,13 +310,7 @@ class Preview(QWidget):
             return
 
         min_x, min_y, max_x, max_y = self.material.bounds
-        width = max(max_x - min_x, 1e-9)
-        height = max(max_y - min_y, 1e-9)
-        padding = 36.0
-        factor = min(
-            max((self.width() - 2 * padding) / width, 1e-9),
-            max((self.height() - 2 * padding) / height, 1e-9),
-        ) * self.zoom_factor
+        factor = self._view_scale()
         painter.translate(
             self.width() / 2 + self.pan_offset.x(),
             self.height() / 2 + 5 + self.pan_offset.y(),
@@ -210,6 +322,31 @@ class Preview(QWidget):
         painter.setPen(QPen(QColor("#f4d84b"), max(1.0 / factor, 0.25 / factor)))
         painter.setBrush(QColor(21, 179, 205, 48))
         painter.drawPath(outline)
+        grid_spacing = self._grid_spacing_for_scale(factor)
+        if grid_spacing != self.grid_spacing_mm:
+            self.grid_spacing_mm = grid_spacing
+            self.gridSpacingChanged.emit(grid_spacing)
+        if self.grid_visible:
+            painter.save()
+            painter.setClipPath(outline)
+            grid_pen = QPen(QColor("#57708d"), 0.8 / factor)
+            painter.setPen(grid_pen)
+            painter.setBrush(Qt.NoBrush)
+            x_count = math.floor((max_x - min_x) / grid_spacing)
+            y_count = math.floor((max_y - min_y) / grid_spacing)
+            for index in range(x_count + 1):
+                x = min_x + index * grid_spacing
+                painter.drawLine(
+                    QPointF(x, min_y),
+                    QPointF(x, max_y),
+                )
+            for index in range(y_count + 1):
+                y = min_y + index * grid_spacing
+                painter.drawLine(
+                    QPointF(min_x, y),
+                    QPointF(max_x, y),
+                )
+            painter.restore()
         if self.show_margin and (
             self.margin > 0 or self.inner_margin > 0
         ):
@@ -247,6 +384,49 @@ class Preview(QWidget):
                     painter.rotate(self.angle)
                     painter.drawPath(opening_path)
                     painter.restore()
+        if self.measurement_points:
+            painter.save()
+            painter.resetTransform()
+            first = self._world_to_screen(self.measurement_points[0], factor)
+            marker_pen = QPen(QColor("#fb923c"), 2)
+            painter.setPen(marker_pen)
+            painter.setBrush(QColor("#fb923c"))
+            painter.drawEllipse(first, 4, 4)
+            if len(self.measurement_points) == 2:
+                second = self._world_to_screen(self.measurement_points[1], factor)
+                painter.drawLine(first, second)
+                painter.drawEllipse(second, 4, 4)
+                painter.setPen(QColor("#ffffff"))
+                delta_x = abs(
+                    self.measurement_points[1][0]
+                    - self.measurement_points[0][0]
+                )
+                delta_y = abs(
+                    self.measurement_points[1][1]
+                    - self.measurement_points[0][1]
+                )
+                distance = math.hypot(delta_x, delta_y)
+                midpoint = QPointF(
+                    (first.x() + second.x()) / 2,
+                    (first.y() + second.y()) / 2 - 10,
+                )
+                painter.drawText(
+                    midpoint,
+                    f"{distance:.2f} mm",
+                )
+            painter.restore()
+
+    def _world_to_screen(
+        self, position: tuple[float, float], factor: float
+    ) -> QPointF:
+        assert self.material is not None
+        min_x, min_y, max_x, max_y = self.material.bounds
+        center_x = self.width() / 2 + self.pan_offset.x()
+        center_y = self.height() / 2 + 5 + self.pan_offset.y()
+        return QPointF(
+            center_x + factor * (position[0] - (min_x + max_x) / 2),
+            center_y - factor * (position[1] - (min_y + max_y) / 2),
+        )
 
 
 def _geometry_path(geometry: BaseGeometry) -> QPainterPath:
@@ -394,7 +574,44 @@ class MainWindow(QMainWindow):
         fit_button.setToolTip("Dopasuj rysunek do podglądu")
         fit_button.clicked.connect(self.output_preview.reset_zoom)
         preview_toolbar.addWidget(fit_button)
+        self.grid_toggle = QCheckBox("Siatka")
+        self.grid_toggle.setChecked(True)
+        self.grid_toggle.toggled.connect(
+            self.output_preview.set_grid_visible
+        )
+        self.grid_spacing_label = QLabel("Siatka: 100 mm")
+        self.grid_spacing_label.setObjectName("muted")
+        self.output_preview.gridSpacingChanged.connect(
+            lambda spacing: self.grid_spacing_label.setText(
+                f"Siatka: {spacing} mm"
+            )
+        )
+        preview_toolbar.addWidget(self.grid_toggle)
+        preview_toolbar.addWidget(self.grid_spacing_label)
+        self.measure_button = QPushButton("Wymiaruj")
+        self.measure_button.setCheckable(True)
+        self.measure_button.setToolTip(
+            "Kliknij dwa punkty na krawędzi detalu lub otworu, aby zmierzyć "
+            "odległość"
+        )
+        self.measure_button.toggled.connect(
+            self.output_preview.set_measurement_mode
+        )
+        clear_measurement_button = QPushButton("Wyczyść wymiar")
+        clear_measurement_button.clicked.connect(
+            self.output_preview.clear_measurement
+        )
+        self.measurement_label = QLabel("")
+        self.measurement_label.setObjectName("muted")
+        self.output_preview.measurementChanged.connect(
+            self.measurement_label.setText
+        )
         preview_layout.addLayout(preview_toolbar)
+        measurement_toolbar = QHBoxLayout()
+        measurement_toolbar.addWidget(self.measure_button)
+        measurement_toolbar.addWidget(clear_measurement_button)
+        measurement_toolbar.addWidget(self.measurement_label, 1)
+        preview_layout.addLayout(measurement_toolbar)
 
         previews = QHBoxLayout()
         previews.setContentsMargins(0, 0, 0, 0)
