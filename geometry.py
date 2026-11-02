@@ -668,15 +668,21 @@ def generate_holes(
 ) -> list[tuple[float, float]]:
     if opening_shape.is_empty or opening_shape.area <= 0:
         raise ValueError("Kształt otworu musi mieć dodatnie pole.")
-    use_legacy_staggered_pitch = vertical_spacing_mm is None
     if vertical_spacing_mm is None:
         vertical_spacing_mm = spacing_mm
+    if pattern not in {"square", "staggered"}:
+        raise ValueError("Nieznany typ układu otworów.")
     if spacing_mode == "pitch":
-        if spacing_mm <= 0 or vertical_spacing_mm <= 0:
+        if spacing_mm <= 0 or (
+            pattern == "square" and vertical_spacing_mm <= 0
+        ):
             raise ValueError("Podziałka musi być większa od zera.")
     elif (
         spacing_mode == "gap"
-        and (spacing_mm < 0 or vertical_spacing_mm < 0)
+        and (
+            spacing_mm < 0
+            or (pattern == "square" and vertical_spacing_mm < 0)
+        )
     ):
         raise ValueError("Odstęp nie może być ujemny.")
     if margin_mm < 0 or (
@@ -685,8 +691,6 @@ def generate_holes(
         raise ValueError("Margines nie może być ujemny.")
     if not opening_shape.is_valid:
         raise ValueError("Kształt otworu tworzy nieprawidłową geometrię.")
-    if pattern not in {"square", "staggered"}:
-        raise ValueError("Nieznany typ układu otworów.")
     if spacing_mode not in {"gap", "pitch"}:
         raise ValueError("Nieznany tryb określania odległości.")
 
@@ -697,7 +701,13 @@ def generate_holes(
         for y in (shape_min_y, shape_max_y)
     )
     horizontal_gap = spacing_mm if spacing_mode == "gap" else 0.0
-    vertical_gap = vertical_spacing_mm if spacing_mode == "gap" else 0.0
+    vertical_gap = (
+        horizontal_gap
+        if pattern == "staggered"
+        else (
+            vertical_spacing_mm if spacing_mode == "gap" else 0.0
+        )
+    )
 
     def pitch_for_gap(offset_x: float, offset_y: float, required: float) -> float:
         required = max(required, 1e-7)
@@ -726,43 +736,22 @@ def generate_holes(
         return high
 
     if spacing_mode == "gap":
-        horizontal_pitch = pitch_for_gap(1, 0, horizontal_gap)
-        vertical_pitch = pitch_for_gap(0, 1, vertical_gap)
         if pattern == "staggered":
-            required_diagonal_gap = min(horizontal_gap, vertical_gap)
-
-            def diagonal_gaps_satisfied(factor: float) -> bool:
-                return all(
-                    opening_shape.distance(
-                        translate(
-                            opening_shape,
-                            xoff=offset_x * horizontal_pitch * factor,
-                            yoff=vertical_pitch * factor,
-                        )
-                    )
-                    + 1e-7
-                    >= required_diagonal_gap
-                    for offset_x in (0.5, -0.5)
-                )
-
-            if required_diagonal_gap > 0 and not diagonal_gaps_satisfied(1):
-                low, high = 1.0, 2.0
-                while not diagonal_gaps_satisfied(high):
-                    high *= 2
-                for _ in range(40):
-                    middle = (low + high) / 2
-                    if diagonal_gaps_satisfied(middle):
-                        high = middle
-                    else:
-                        low = middle
-                horizontal_pitch *= high
-                vertical_pitch *= high
+            horizontal_pitch = max(
+                pitch_for_gap(1, 0, horizontal_gap),
+                pitch_for_gap(0.5, math.sqrt(3) / 2, horizontal_gap),
+                pitch_for_gap(-0.5, math.sqrt(3) / 2, horizontal_gap),
+            )
+            vertical_pitch = horizontal_pitch * math.sqrt(3) / 2
+        else:
+            horizontal_pitch = pitch_for_gap(1, 0, horizontal_gap)
+            vertical_pitch = pitch_for_gap(0, 1, vertical_gap)
     else:
         horizontal_pitch = spacing_mm
         vertical_pitch = (
-            vertical_spacing_mm
-            if not use_legacy_staggered_pitch or pattern != "staggered"
-            else spacing_mm * math.sqrt(3) / 2
+            spacing_mm * math.sqrt(3) / 2
+            if pattern == "staggered"
+            else vertical_spacing_mm
         )
 
     allowed = material_clearance(material, margin_mm, inner_margin_mm)

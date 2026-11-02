@@ -146,7 +146,9 @@ Wymiary kształtów i odstępy podaje się w milimetrach.
 
 - **Układ prosty (kwadratowy)** rozmieszcza środki otworów z osobno
   ustawianym odstępem / podziałką poziomą i pionową.
-- **Układ mijankowy** przesuwa co drugi rząd o połowę podziałki.
+- **Układ mijankowy** używa jednej wartości odstępu / podziałki dla kierunku
+  poziomego i sąsiadów po przekątnej. Kolejne rzędy są przesunięte o połowę tej
+  wartości, a ich pionowy rozstaw wynika z geometrii układu trójkątnego.
 - **Układ losowy** rozmieszcza otwory w losowych miejscach, bez nakładania i
   z zachowaniem marginesów. Rozkłada perforację na całej dostępnej wysokości
   detalu, także w oddzielnych fragmentach konturu. Losowanie wymiaru można
@@ -166,12 +168,16 @@ Wymiary kształtów i odstępy podaje się w milimetrach.
   z możliwością anulowania, a interfejs pozostaje responsywny. Pasek statusu
   pokazuje uzyskany stopień prześwitu.
 - **Tryb odległości — odstęp między krawędziami** oznacza minimalną
-  szczelinę pomiędzy obrysami sąsiednich otworów; odstęp poziomy i pionowy
-  są ustawiane niezależnie. Program dobiera podziałkę na podstawie
-  rzeczywistego kształtu i sprawdza, czy otwory nie zachodzą na siebie.
+  szczelinę pomiędzy obrysami sąsiednich otworów. W układzie prostym odstęp
+  poziomy i pionowy są ustawiane niezależnie. W układzie mijankowym jedna
+  wartość obowiązuje poziomo i po przekątnej; program dobiera podziałkę na
+  podstawie rzeczywistego kształtu i sprawdza, czy otwory nie zachodzą na
+  siebie.
 - **Tryb odległości — podziałka osiowa** ustawia odległość między środkami
-  sąsiednich otworów. Podziałki poziomą i pionową można ustawiać niezależnie;
-  w układzie mijankowym pionowa podziałka określa odległość między rzędami.
+  sąsiednich otworów. W układzie prostym podziałki poziomą i pionową można
+  ustawiać niezależnie. W układzie mijankowym jedna podziałka obowiązuje
+  poziomo i po przekątnej, a odległość między rzędami jest wyliczana
+  automatycznie.
 - **Kąt siatki** obraca układ rozmieszczenia względem detalu.
 - **Kąt kształtu względem siatki** obraca sam otwór niezależnie od układu.
   Wartość 0° oznacza, że kształt obraca się razem z siatką, jak w

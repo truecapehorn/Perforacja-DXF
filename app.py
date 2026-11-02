@@ -1358,10 +1358,18 @@ class MainWindow(QMainWindow):
         self.horizontal_spacing_input.setMinimum(minimum_spacing)
         self.vertical_spacing_input.setMinimum(minimum_spacing)
         self.horizontal_spacing_label.setText(
-            "Odstęp / podziałka pozioma:"
+            (
+                "Odstęp / podziałka pozioma i po przekątnej:"
+                if not is_random
+                and self.pattern_input.currentData() == "staggered"
+                else "Odstęp / podziałka pozioma:"
+            )
         )
         self.vertical_spacing_label.setText(
             "Odstęp / podziałka pionowa:"
+        )
+        self.vertical_spacing_controls.setVisible(
+            is_random or self.pattern_input.currentData() != "staggered"
         )
         self.angle_label.setText(
             "Kąt otworów:" if is_random else "Kąt siatki:"
@@ -1478,7 +1486,11 @@ class MainWindow(QMainWindow):
                 self.spacing_mode.currentData(),
                 inner_margin_mm=self.inner_margin_input.value(),
                 opening_angle_degrees=self.opening_angle_input.value(),
-                vertical_spacing_mm=self.vertical_spacing_input.value(),
+                vertical_spacing_mm=(
+                    self.vertical_spacing_input.value()
+                    if self.pattern_input.currentData() == "square"
+                    else None
+                ),
             )
         except ValueError as error:
             self.preview_material = None
@@ -1621,17 +1633,23 @@ class MainWindow(QMainWindow):
 
     def _current_settings(self) -> PerforationSettings:
         opening_type = self.opening_type_input.currentData()
+        pattern = self.pattern_input.currentData()
+        horizontal_spacing = self.horizontal_spacing_input.value()
         return PerforationSettings(
             width_mm=self.width_input.value(),
             height_mm=self.height_input.value(),
-            pattern=self.pattern_input.currentData(),
+            pattern=pattern,
             opening_type=opening_type,
             opening_width_mm=self.opening_width_input.value(),
             opening_height_mm=self.opening_height_input.value(),
             polygon_sides=self.polygon_sides_input.value(),
-            spacing_mm=max(self.horizontal_spacing_input.value(), 0.1),
-            horizontal_spacing_mm=self.horizontal_spacing_input.value(),
-            vertical_spacing_mm=self.vertical_spacing_input.value(),
+            spacing_mm=max(horizontal_spacing, 0.1),
+            horizontal_spacing_mm=horizontal_spacing,
+            vertical_spacing_mm=(
+                horizontal_spacing
+                if pattern == "staggered"
+                else self.vertical_spacing_input.value()
+            ),
             spacing_mode=self.spacing_mode.currentData(),
             grid_angle_degrees=self.angle_input.value(),
             opening_angle_degrees=self.opening_angle_input.value(),

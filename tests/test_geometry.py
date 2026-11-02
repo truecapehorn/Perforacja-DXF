@@ -33,7 +33,14 @@ def test_staggered_pitch_is_exact_between_diagonal_neighbors(angle):
     square = Polygon([(0, 0), (60, 0), (60, 60), (0, 60)])
 
     holes = generate_holes(
-        square, make_opening_shape("circle", 2), 10, 0, angle, "staggered", "pitch"
+        square,
+        make_opening_shape("circle", 2),
+        10,
+        0,
+        angle,
+        "staggered",
+        "pitch",
+        vertical_spacing_mm=20,
     )
 
     nearest_distance = min(
@@ -42,13 +49,26 @@ def test_staggered_pitch_is_exact_between_diagonal_neighbors(angle):
         for second in holes[index + 1 :]
     )
     assert nearest_distance == pytest.approx(10.0)
+    if angle == 0:
+        row_positions = sorted({round(y, 6) for _, y in holes})
+        assert all(
+            second - first == pytest.approx(10 * math.sqrt(3) / 2)
+            for first, second in zip(row_positions, row_positions[1:])
+        )
 
 
 def test_staggered_gap_includes_diameter_in_diagonal_pitch():
     square = Polygon([(0, 0), (60, 0), (60, 60), (0, 60)])
 
     holes = generate_holes(
-        square, make_opening_shape("circle", 4), 6, 0, 0, "staggered", "gap"
+        square,
+        make_opening_shape("circle", 4),
+        6,
+        0,
+        0,
+        "staggered",
+        "gap",
+        vertical_spacing_mm=20,
     )
 
     nearest_distance = min(
@@ -57,6 +77,11 @@ def test_staggered_gap_includes_diameter_in_diagonal_pitch():
         for second in holes[index + 1 :]
     )
     assert nearest_distance == pytest.approx(10.0)
+    row_positions = sorted({round(y, 6) for _, y in holes})
+    assert all(
+        second - first == pytest.approx(10 * math.sqrt(3) / 2)
+        for first, second in zip(row_positions, row_positions[1:])
+    )
 
 
 def test_pitch_allows_openings_that_touch_without_overlapping():
