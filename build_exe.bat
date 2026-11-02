@@ -27,6 +27,7 @@ echo.
 
 call :copy_to "G:\Mój dysk\!!Projekty\Perforacja-DXF"
 call :copy_to "Z:\BACKUPS\INSTALKI"
+call :copy_to "P:\DZIAŁ_OBRÓBKI_WSTEPNEJ\Jablonski_Norbert\!!!WYMIANA\Perforacja-DXF"
 exit /b 0
 
 :copy_to
