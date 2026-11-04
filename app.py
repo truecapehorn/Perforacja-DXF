@@ -48,6 +48,7 @@ from shapely.geometry import MultiPolygon, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import nearest_points
 
+from app_config import AppConfig, load_app_config
 from perforation_settings import (
     PerforationSettings,
     load_perforation_settings,
@@ -471,8 +472,9 @@ def _parameter_input(
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, config: AppConfig) -> None:
         super().__init__()
+        self.config = config
         self.setWindowTitle("Perforacja DXF")
         self.resize(1440, 900)
         self.setMinimumSize(1120, 700)
@@ -494,7 +496,7 @@ class MainWindow(QMainWindow):
         self._random_pending_opening: BaseGeometry | None = None
         self._preview_timer = QTimer(self)
         self._preview_timer.setSingleShot(True)
-        self._preview_timer.setInterval(2000)
+        self._preview_timer.setInterval(config.preview_debounce_ms)
         self._preview_timer.timeout.connect(self._refresh)
         self._build_ui()
 
@@ -548,7 +550,7 @@ class MainWindow(QMainWindow):
         preview_layout.setSpacing(8)
         preview_toolbar = QHBoxLayout()
         self.source_preview_toggle = QCheckBox("Pokaż rysunek źródłowy")
-        self.source_preview_toggle.setChecked(True)
+        self.source_preview_toggle.setChecked(self.config.show_source_preview)
         self.source_preview_toggle.toggled.connect(
             lambda visible: self.source_preview.setVisible(visible)
         )
@@ -580,7 +582,7 @@ class MainWindow(QMainWindow):
         fit_button.clicked.connect(self.output_preview.reset_zoom)
         preview_toolbar.addWidget(fit_button)
         self.grid_toggle = QCheckBox("Siatka")
-        self.grid_toggle.setChecked(True)
+        self.grid_toggle.setChecked(self.config.show_grid)
         self.grid_toggle.toggled.connect(
             self.output_preview.set_grid_visible
         )
@@ -674,10 +676,16 @@ class MainWindow(QMainWindow):
         self.layout_mode_input = QComboBox()
         self.layout_mode_input.addItem("Regularna siatka", "grid")
         self.layout_mode_input.addItem("Losowy", "random")
+        self.layout_mode_input.setCurrentIndex(
+            self.layout_mode_input.findData(self.config.layout_mode)
+        )
         form.addRow("Rozmieszczenie:", self.layout_mode_input)
         self.pattern_input = QComboBox()
         self.pattern_input.addItem("Prosty (kwadratowy)", "square")
         self.pattern_input.addItem("Mijankowy", "staggered")
+        self.pattern_input.setCurrentIndex(
+            self.pattern_input.findData(self.config.pattern)
+        )
         self.pattern_label = QLabel("Układ:")
         form.addRow(self.pattern_label, self.pattern_input)
         self.opening_type_input = QComboBox()
@@ -689,6 +697,9 @@ class MainWindow(QMainWindow):
         self.opening_type_input.addItem("Fasolka", "slot")
         self.opening_type_input.addItem("Wielokąt foremny", "regular_polygon")
         self.opening_type_input.addItem("Własny kształt z DXF", "custom")
+        self.opening_type_input.setCurrentIndex(
+            self.opening_type_input.findData(self.config.opening_type)
+        )
         form.addRow("Kształt otworu:", self.opening_type_input)
 
         def dimension_range_row(
@@ -736,15 +747,20 @@ class MainWindow(QMainWindow):
             controls_layout.addWidget(range_widget)
             return controls
 
-        self.opening_width_input = _parameter_input(10.0, 0.1, 5000.0)
+        self.opening_width_input = _parameter_input(
+            self.config.opening_width_mm, 0.1, 5000.0
+        )
         self.opening_width_label = QLabel("Szerokość otworu:")
         self.randomize_width_input = QCheckBox("Losuj szerokość")
-        self.randomize_width_input.setChecked(True)
+        self.randomize_width_input.setChecked(self.config.randomize_width)
         (
             self.random_width_range,
             self.random_min_width_input,
             self.random_max_width_input,
-        ) = dimension_range_row(10.0, 20.0)
+        ) = dimension_range_row(
+            self.config.random_min_width_mm,
+            self.config.random_max_width_mm,
+        )
         self.random_width_range_label = QLabel("Zakres:")
         self.opening_width_controls = dimension_controls(
             self.opening_width_label,
@@ -754,14 +770,19 @@ class MainWindow(QMainWindow):
             self.random_width_range,
         )
         form.addRow(self.opening_width_controls)
-        self.opening_height_input = _parameter_input(10.0, 0.1, 5000.0)
+        self.opening_height_input = _parameter_input(
+            self.config.opening_height_mm, 0.1, 5000.0
+        )
         self.opening_height_label = QLabel("Wysokość otworu (pionowo):")
         self.randomize_height_input = QCheckBox("Losuj wysokość")
         (
             self.random_height_range,
             self.random_min_height_input,
             self.random_max_height_input,
-        ) = dimension_range_row(10.0, 20.0)
+        ) = dimension_range_row(
+            self.config.random_min_height_mm,
+            self.config.random_max_height_mm,
+        )
         self.random_height_range_label = QLabel("Zakres:")
         self.opening_height_controls = dimension_controls(
             self.opening_height_label,
@@ -773,7 +794,7 @@ class MainWindow(QMainWindow):
         form.addRow(self.opening_height_controls)
         self.polygon_sides_input = QSpinBox()
         self.polygon_sides_input.setRange(3, 20)
-        self.polygon_sides_input.setValue(6)
+        self.polygon_sides_input.setValue(self.config.polygon_sides)
         self.polygon_sides_label = QLabel("Liczba boków:")
         form.addRow(self.polygon_sides_label, self.polygon_sides_input)
         self.custom_opening_row = QWidget()
@@ -791,12 +812,16 @@ class MainWindow(QMainWindow):
         self.spacing_mode = QComboBox()
         self.spacing_mode.addItem("Odstęp między krawędziami", "gap")
         self.spacing_mode.addItem("Podziałka osiowa", "pitch")
+        self.spacing_mode.setCurrentIndex(
+            self.spacing_mode.findData(self.config.spacing_mode)
+        )
         self.spacing_mode_label = QLabel("Tryb odległości:")
         form.addRow(self.spacing_mode_label, self.spacing_mode)
         self.angle_input = QDoubleSpinBox()
         self.angle_input.setDecimals(1)
         self.angle_input.setRange(-180.0, 180.0)
         self.angle_input.setSingleStep(5.0)
+        self.angle_input.setValue(self.config.grid_angle_degrees)
         self.angle_input.setSuffix("°")
         self.angle_label = QLabel("Kąt siatki:")
         form.addRow(self.angle_label, self.angle_input)
@@ -804,28 +829,41 @@ class MainWindow(QMainWindow):
         self.opening_angle_input.setDecimals(1)
         self.opening_angle_input.setRange(-180.0, 180.0)
         self.opening_angle_input.setSingleStep(5.0)
+        self.opening_angle_input.setValue(self.config.opening_angle_degrees)
         self.opening_angle_input.setSuffix("°")
         self.opening_angle_label = QLabel("Kąt kształtu względem siatki:")
         form.addRow(self.opening_angle_label, self.opening_angle_input)
-        self.margin_input = _parameter_input(10.0, 0.0, 5000.0)
+        self.margin_input = _parameter_input(
+            self.config.outer_margin_mm, 0.0, 5000.0
+        )
         form.addRow("Margines od krawędzi zewnętrznej:", self.margin_input)
-        self.inner_margin_input = _parameter_input(10.0, 0.0, 5000.0)
+        self.inner_margin_input = _parameter_input(
+            self.config.inner_margin_mm, 0.0, 5000.0
+        )
         form.addRow(
             "Margines od krawędzi wewnętrznej / wyspy:",
             self.inner_margin_input,
         )
 
         self.horizontal_spacing_input = _parameter_input(
-            10.0, 0.0, 10_000.0
+            self.config.horizontal_spacing_mm, 0.0, 10_000.0
         )
         self.randomize_horizontal_gap_input = QCheckBox(
             "Losuj odstęp poziomy"
+        )
+        self.randomize_horizontal_gap_input.setChecked(
+            self.config.randomize_horizontal_gap
         )
         (
             self.random_horizontal_gap_range,
             self.random_min_horizontal_gap_input,
             self.random_max_horizontal_gap_input,
-        ) = dimension_range_row(2.0, 8.0, 0.0, 10_000.0)
+        ) = dimension_range_row(
+            self.config.random_min_horizontal_gap_mm,
+            self.config.random_max_horizontal_gap_mm,
+            0.0,
+            10_000.0,
+        )
         self.random_horizontal_gap_range_label = QLabel("Zakres:")
         self.horizontal_spacing_label = QLabel("Odstęp / podziałka pozioma:")
         self.horizontal_spacing_controls = dimension_controls(
@@ -838,16 +876,24 @@ class MainWindow(QMainWindow):
         form.addRow(self.horizontal_spacing_controls)
 
         self.vertical_spacing_input = _parameter_input(
-            10.0, 0.0, 10_000.0
+            self.config.vertical_spacing_mm, 0.0, 10_000.0
         )
         self.randomize_vertical_gap_input = QCheckBox(
             "Losuj odstęp pionowy"
+        )
+        self.randomize_vertical_gap_input.setChecked(
+            self.config.randomize_vertical_gap
         )
         (
             self.random_vertical_gap_range,
             self.random_min_vertical_gap_input,
             self.random_max_vertical_gap_input,
-        ) = dimension_range_row(2.0, 8.0, 0.0, 10_000.0)
+        ) = dimension_range_row(
+            self.config.random_min_vertical_gap_mm,
+            self.config.random_max_vertical_gap_mm,
+            0.0,
+            10_000.0,
+        )
         self.random_vertical_gap_range_label = QLabel("Zakres:")
         self.vertical_spacing_label = QLabel("Odstęp / podziałka pionowa:")
         self.vertical_spacing_controls = dimension_controls(
@@ -869,6 +915,11 @@ class MainWindow(QMainWindow):
         )
         self.perforation_export_input.addItem(
             "Perforacja jako jeden blok", True
+        )
+        self.perforation_export_input.setCurrentIndex(
+            self.perforation_export_input.findData(
+                self.config.perforation_as_block
+            )
         )
         layout.addWidget(self.perforation_export_input)
         output_row = QHBoxLayout()
@@ -1696,7 +1747,16 @@ class MainWindow(QMainWindow):
 
 def main() -> int:
     application = QApplication(sys.argv)
-    window = MainWindow()
+    try:
+        config = load_app_config()
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
+        QMessageBox.critical(
+            None,
+            "Nie można wczytać konfiguracji programu",
+            f"Sprawdź plik app_config.json:\n{error}",
+        )
+        return 1
+    window = MainWindow(config)
     window.show()
     return application.exec()
 

@@ -41,6 +41,31 @@ bez aktywowania:
 .\.venv\Scripts\python.exe app.py
 ```
 
+## Konfiguracja programu
+
+Ustawienia domyślne aplikacji można zmieniać w pliku `app_config.json`
+znajdującym się obok `app.py` albo — dla zbudowanej aplikacji — obok pliku
+EXE. Są to ustawienia startowe; konfiguracja konkretnej perforacji wczytana
+z osobnego pliku JSON ma pierwszeństwo. Wymiary detalu po otwarciu DXF są
+pobierane z rysunku.
+
+W pliku można zmienić opóźnienie podglądu (`preview_debounce_ms`, w
+milisekundach), domyślny typ i rozmiar otworów, ich kąt, liczbę boków,
+rodzaj układu, odstępy/podziałki i marginesy, a także początkowe ustawienia
+losowania, zakresy losowe, sposób eksportu oraz widoczność siatki i rysunku
+źródłowego. Wartości liczbowe podaje się w milimetrach, z wyjątkiem kątów
+i opóźnienia. Dla pól wyboru używaj wartości: `opening_type` — `circle`,
+`square`, `rectangle`, `triangle`, `ellipse`, `slot` lub `regular_polygon`;
+`layout_mode` — `grid` albo `random`; `pattern` — `square` albo `staggered`;
+`spacing_mode` — `gap` albo `pitch`. Ustawienia `true`/`false` zapisuj jako
+wartości logiczne JSON, bez cudzysłowów. Przy `pitch` odstępy poziomy
+i pionowy muszą być większe od zera.
+
+Edytuj wartości w istniejących polach, zachowując poprawną składnię JSON.
+Nieznane pola i wartości spoza zakresu powodują wyświetlenie błędu przy
+uruchomieniu, zamiast cichego użycia nieprawidłowej konfiguracji. Nie usuwaj
+pliku `app_config.json`; aplikacja potrzebuje go obok programu.
+
 ## Uruchamianie w Linux
 
 W Debianie i Ubuntu najpierw zainstaluj Pythona, moduł venv oraz narzędzia
@@ -74,7 +99,8 @@ Uruchom `build_exe.bat` w Windows. Skrypt zapyta o nazwę pliku EXE (podaj ją
 bez rozszerzenia `.exe`); pozostawienie pola pustego wybiera
 `PerforacjaDXF`. Następnie skrypt tworzy środowisko `.build-venv`, instaluje
 zależności i buduje jednoplikową aplikację. Wynik znajduje się w folderze
-`dist`, pod podaną nazwą, np. `dist\MojaPerforacja.exe`. Przy pierwszym
+`dist`, pod podaną nazwą, np. `dist\MojaPerforacja.exe`; obok EXE skrypt
+kopiuje edytowalny plik `app_config.json`. Przy pierwszym
 budowaniu wymagane jest połączenie z internetem.
 
 Skrypt buduje wersję dla Windows; nie tworzy pliku wykonywalnego dla Linux.

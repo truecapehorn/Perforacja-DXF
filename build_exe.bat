@@ -20,6 +20,12 @@ if errorlevel 1 exit /b 1
   app.py
 if errorlevel 1 exit /b 1
 
+copy /Y "app_config.json" "dist\app_config.json" >nul
+if errorlevel 1 (
+  echo Nie mozna skopiowac app_config.json do folderu dist.
+  exit /b 1
+)
+
 echo.
 set "BUILT_EXE=dist\%APP_NAME%.exe"
 echo Gotowy plik: %BUILT_EXE%
@@ -46,6 +52,11 @@ copy /Y "%BUILT_EXE%" "%TARGET_DIR%\%APP_NAME%.exe" >nul
 if errorlevel 1 (
   echo NIE SKOPIOWANO do "%TARGET_DIR%\%APP_NAME%.exe" - blad kopiowania.
 ) else (
-  echo Skopiowano do: "%TARGET_DIR%\%APP_NAME%.exe"
+  copy /Y "app_config.json" "%TARGET_DIR%\app_config.json" >nul
+  if errorlevel 1 (
+    echo EXE skopiowano, ale nie skopiowano "%TARGET_DIR%\app_config.json".
+  ) else (
+    echo Skopiowano EXE i konfiguracje do: "%TARGET_DIR%"
+  )
 )
 exit /b 0
