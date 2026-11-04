@@ -1,5 +1,5 @@
 {
-  "preview_debounce_ms": 2000,
+  "preview_debounce_ms": 500,
   "opening_type": "circle",
   "opening_width_mm": 10.0,
   "opening_height_mm": 10.0,
