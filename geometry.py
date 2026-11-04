@@ -679,10 +679,7 @@ def generate_holes(
             raise ValueError("Podziałka musi być większa od zera.")
     elif (
         spacing_mode == "gap"
-        and (
-            spacing_mm < 0
-            or (pattern == "square" and vertical_spacing_mm < 0)
-        )
+        and (spacing_mm < 0 or vertical_spacing_mm < 0)
     ):
         raise ValueError("Odstęp nie może być ujemny.")
     if margin_mm < 0 or (
@@ -702,11 +699,7 @@ def generate_holes(
     )
     horizontal_gap = spacing_mm if spacing_mode == "gap" else 0.0
     vertical_gap = (
-        horizontal_gap
-        if pattern == "staggered"
-        else (
-            vertical_spacing_mm if spacing_mode == "gap" else 0.0
-        )
+        vertical_spacing_mm if spacing_mode == "gap" else 0.0
     )
 
     def pitch_for_gap(offset_x: float, offset_y: float, required: float) -> float:
@@ -737,12 +730,33 @@ def generate_holes(
 
     if spacing_mode == "gap":
         if pattern == "staggered":
-            horizontal_pitch = max(
-                pitch_for_gap(1, 0, horizontal_gap),
-                pitch_for_gap(0.5, math.sqrt(3) / 2, horizontal_gap),
-                pitch_for_gap(-0.5, math.sqrt(3) / 2, horizontal_gap),
-            )
-            vertical_pitch = horizontal_pitch * math.sqrt(3) / 2
+            horizontal_pitch = pitch_for_gap(1, 0, horizontal_gap)
+            half_row_offset = horizontal_pitch / 2
+
+            def has_vertical_gap(distance: float) -> bool:
+                return (
+                    opening_shape.distance(
+                        translate(
+                            opening_shape,
+                            xoff=half_row_offset,
+                            yoff=distance,
+                        )
+                    )
+                    + 1e-7
+                    >= max(vertical_gap, 1e-7)
+                )
+
+            low = 0.0
+            high = max(2 * radius + vertical_gap, vertical_gap, 1e-7)
+            while not has_vertical_gap(high):
+                high *= 2
+            for _ in range(40):
+                middle = (low + high) / 2
+                if has_vertical_gap(middle):
+                    high = middle
+                else:
+                    low = middle
+            vertical_pitch = high
         else:
             horizontal_pitch = pitch_for_gap(1, 0, horizontal_gap)
             vertical_pitch = pitch_for_gap(0, 1, vertical_gap)

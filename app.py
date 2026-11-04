@@ -14,6 +14,7 @@ from PyQt5.QtCore import (
     QPoint,
     QPointF,
     QThread,
+    QTimer,
     Qt,
     pyqtSignal,
     pyqtSlot,
@@ -491,6 +492,10 @@ class MainWindow(QMainWindow):
         self._random_progress: QProgressDialog | None = None
         self._random_pending_material: BaseGeometry | None = None
         self._random_pending_opening: BaseGeometry | None = None
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(3000)
+        self._preview_timer.timeout.connect(self._refresh)
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -1092,6 +1097,7 @@ class MainWindow(QMainWindow):
     def _parameters_changed(self, *_args) -> None:
         self._update_random_controls()
         if self.layout_mode_input.currentData() == "random":
+            self._preview_timer.stop()
             self._random_result_current = False
             self.export_button.setEnabled(False)
             self.status.setStyleSheet("color: #fbbf24;")
@@ -1100,11 +1106,18 @@ class MainWindow(QMainWindow):
                 "aby przeliczyć perforację."
             )
             return
-        self._refresh()
+        self._random_result_current = False
+        self.export_button.setEnabled(False)
+        self.status.setStyleSheet("color: #fbbf24;")
+        self.status.setText(
+            "Parametry zmienione — podgląd zostanie zaktualizowany za 3 s."
+        )
+        self._preview_timer.start()
 
     def _layout_mode_changed(self, *_args) -> None:
         self._update_random_controls()
         if self.layout_mode_input.currentData() == "random":
+            self._preview_timer.stop()
             self._random_result_current = False
             self.preview_material = None
             self.preview_holes = []
@@ -1117,7 +1130,7 @@ class MainWindow(QMainWindow):
                 "Kliknij „Losuj losowy układ”, aby utworzyć perforację."
             )
             return
-        self._refresh()
+        self._parameters_changed()
 
     def _generate_random_on_request(self) -> None:
         if self.drawing is None or self._random_thread is not None:
@@ -1362,6 +1375,7 @@ class MainWindow(QMainWindow):
                 "Odstęp / podziałka pozioma i po przekątnej:"
                 if not is_random
                 and self.pattern_input.currentData() == "staggered"
+                and self.spacing_mode.currentData() == "pitch"
                 else "Odstęp / podziałka pozioma:"
             )
         )
@@ -1369,7 +1383,9 @@ class MainWindow(QMainWindow):
             "Odstęp / podziałka pionowa:"
         )
         self.vertical_spacing_controls.setVisible(
-            is_random or self.pattern_input.currentData() != "staggered"
+            is_random
+            or self.pattern_input.currentData() != "staggered"
+            or self.spacing_mode.currentData() == "gap"
         )
         self.angle_label.setText(
             "Kąt otworów:" if is_random else "Kąt siatki:"
@@ -1458,6 +1474,7 @@ class MainWindow(QMainWindow):
         self._refresh()
 
     def _refresh(self, *_args) -> None:
+        self._preview_timer.stop()
         if self.drawing is None:
             return
         if self.layout_mode_input.currentData() == "random":
@@ -1486,11 +1503,7 @@ class MainWindow(QMainWindow):
                 self.spacing_mode.currentData(),
                 inner_margin_mm=self.inner_margin_input.value(),
                 opening_angle_degrees=self.opening_angle_input.value(),
-                vertical_spacing_mm=(
-                    self.vertical_spacing_input.value()
-                    if self.pattern_input.currentData() == "square"
-                    else None
-                ),
+                vertical_spacing_mm=self.vertical_spacing_input.value(),
             )
         except ValueError as error:
             self.preview_material = None
@@ -1645,11 +1658,7 @@ class MainWindow(QMainWindow):
             polygon_sides=self.polygon_sides_input.value(),
             spacing_mm=max(horizontal_spacing, 0.1),
             horizontal_spacing_mm=horizontal_spacing,
-            vertical_spacing_mm=(
-                horizontal_spacing
-                if pattern == "staggered"
-                else self.vertical_spacing_input.value()
-            ),
+            vertical_spacing_mm=self.vertical_spacing_input.value(),
             spacing_mode=self.spacing_mode.currentData(),
             grid_angle_degrees=self.angle_input.value(),
             opening_angle_degrees=self.opening_angle_input.value(),

@@ -57,31 +57,57 @@ def test_staggered_pitch_is_exact_between_diagonal_neighbors(angle):
         )
 
 
-def test_staggered_gap_includes_diameter_in_diagonal_pitch():
+def test_staggered_gap_uses_independent_horizontal_and_vertical_gaps():
     square = Polygon([(0, 0), (60, 0), (60, 60), (0, 60)])
+    opening = make_opening_shape("circle", 4)
 
     holes = generate_holes(
         square,
-        make_opening_shape("circle", 4),
-        6,
+        opening,
+        2,
         0,
         0,
         "staggered",
         "gap",
-        vertical_spacing_mm=20,
+        vertical_spacing_mm=8,
     )
 
-    nearest_distance = min(
-        math.dist(first, second)
-        for index, first in enumerate(holes)
-        for second in holes[index + 1 :]
-    )
-    assert nearest_distance == pytest.approx(10.0)
-    row_positions = sorted({round(y, 6) for _, y in holes})
+    row_groups: dict[float, list[tuple[float, float]]] = {}
+    for x, y in holes:
+        row_groups.setdefault(round(y, 6), []).append((x, y))
+    rows = sorted(row_groups.values(), key=lambda row: row[0][1])
+    assert len(rows) > 1
+    horizontal_neighbors = sorted(rows[0])
     assert all(
-        second - first == pytest.approx(10 * math.sqrt(3) / 2)
-        for first, second in zip(row_positions, row_positions[1:])
+        opening.distance(
+            translate(opening, xoff=second[0] - first[0])
+        )
+        == pytest.approx(2)
+        for first, second in zip(
+            horizontal_neighbors, horizontal_neighbors[1:]
+        )
     )
+    first_row_y = rows[0][0][1]
+    second_row_y = rows[1][0][1]
+    row_pitch = second_row_y - first_row_y
+    assert row_pitch == pytest.approx(math.sqrt(12**2 - 3**2), abs=0.001)
+    assert opening.distance(
+        translate(opening, xoff=3, yoff=row_pitch)
+    ) == pytest.approx(8)
+
+
+def test_staggered_gap_rejects_negative_vertical_spacing():
+    with pytest.raises(ValueError, match="Odstęp nie może być ujemny"):
+        generate_holes(
+            Polygon([(0, 0), (20, 0), (20, 20), (0, 20)]),
+            make_opening_shape("circle", 4),
+            2,
+            0,
+            0,
+            "staggered",
+            "gap",
+            vertical_spacing_mm=-1,
+        )
 
 
 def test_pitch_allows_openings_that_touch_without_overlapping():

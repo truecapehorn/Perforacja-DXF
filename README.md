@@ -146,9 +146,11 @@ Wymiary kształtów i odstępy podaje się w milimetrach.
 
 - **Układ prosty (kwadratowy)** rozmieszcza środki otworów z osobno
   ustawianym odstępem / podziałką poziomą i pionową.
-- **Układ mijankowy** używa jednej wartości odstępu / podziałki dla kierunku
-  poziomego i sąsiadów po przekątnej. Kolejne rzędy są przesunięte o połowę tej
-  wartości, a ich pionowy rozstaw wynika z geometrii układu trójkątnego.
+- **Układ mijankowy** przesuwa kolejne rzędy o połowę poziomej podziałki.
+  W trybie odstępu między krawędziami można niezależnie ustawić prześwit
+  poziomy i pionowy; w trybie podziałki osiowej jedna podziałka obowiązuje
+  poziomo i po przekątnej, a pionowy rozstaw wynika z geometrii układu
+  trójkątnego.
 - **Układ losowy** rozmieszcza otwory w losowych miejscach, bez nakładania i
   z zachowaniem marginesów. Rozkłada perforację na całej dostępnej wysokości
   detalu, także w oddzielnych fragmentach konturu. Losowanie wymiaru można
@@ -169,10 +171,10 @@ Wymiary kształtów i odstępy podaje się w milimetrach.
   pokazuje uzyskany stopień prześwitu.
 - **Tryb odległości — odstęp między krawędziami** oznacza minimalną
   szczelinę pomiędzy obrysami sąsiednich otworów. W układzie prostym odstęp
-  poziomy i pionowy są ustawiane niezależnie. W układzie mijankowym jedna
-  wartość obowiązuje poziomo i po przekątnej; program dobiera podziałkę na
-  podstawie rzeczywistego kształtu i sprawdza, czy otwory nie zachodzą na
-  siebie.
+  poziomy i pionowy są ustawiane niezależnie. W układzie mijankowym można
+  niezależnie ustawić minimalny odstęp poziomy w rzędzie i pionowy między
+  sąsiednimi rzędami; program dobiera ich rozstaw na podstawie rzeczywistego
+  kształtu i sprawdza, czy otwory nie zachodzą na siebie.
 - **Tryb odległości — podziałka osiowa** ustawia odległość między środkami
   sąsiednich otworów. W układzie prostym podziałki poziomą i pionową można
   ustawiać niezależnie. W układzie mijankowym jedna podziałka obowiązuje
