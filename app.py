@@ -494,7 +494,7 @@ class MainWindow(QMainWindow):
         self._random_pending_opening: BaseGeometry | None = None
         self._preview_timer = QTimer(self)
         self._preview_timer.setSingleShot(True)
-        self._preview_timer.setInterval(3000)
+        self._preview_timer.setInterval(2000)
         self._preview_timer.timeout.connect(self._refresh)
         self._build_ui()
 
@@ -1110,7 +1110,7 @@ class MainWindow(QMainWindow):
         self.export_button.setEnabled(False)
         self.status.setStyleSheet("color: #fbbf24;")
         self.status.setText(
-            "Parametry zmienione — podgląd zostanie zaktualizowany za 3 s."
+            "Parametry zmienione — podgląd zostanie zaktualizowany za 2 s."
         )
         self._preview_timer.start()
 
